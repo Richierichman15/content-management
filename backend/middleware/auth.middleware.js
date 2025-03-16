@@ -3,79 +3,121 @@ const { promisify } = require('util');
 const User = require('../models/user.model');
 
 /**
- * Optional authentication middleware - attaches user to request if token is valid
+ * Authentication middleware
+ * Verifies JWT token and adds user info to request
+ */
+exports.protect = async (req, res, next) => {
+  try {
+    let token;
+    
+    // Get token from Authorization header
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    }
+    
+    // Check if token exists
+    if (!token) {
+      return res.status(401).json({ message: 'Not authorized - no token provided' });
+    }
+    
+    try {
+      // Verify token
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      
+      // Get user from database (exclude password)
+      const user = await User.findById(decoded.id).select('-password');
+      
+      if (!user) {
+        return res.status(401).json({ message: 'User not found or token invalid' });
+      }
+      
+      // Check if user is active
+      if (user.isActive === false) {
+        return res.status(401).json({ message: 'Your account has been deactivated' });
+      }
+      
+      // Add user to request object
+      req.user = user;
+      next();
+    } catch (error) {
+      return res.status(401).json({ message: 'Not authorized - token invalid' });
+    }
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    res.status(500).json({ message: 'Server error in authentication' });
+  }
+};
+
+/**
+ * Optional authentication middleware
+ * Tries to authenticate, but continues even if no token or invalid token
  */
 exports.optionalAuth = async (req, res, next) => {
   try {
     let token;
+    
+    // Get token from Authorization header
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
     }
-
+    
+    // If no token, continue without auth
     if (!token) {
-      return next(); // Continue without authentication
+      return next();
     }
-
+    
     try {
-      const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
-      const currentUser = await User.findById(decoded.id);
+      // Verify token
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
       
-      if (currentUser) {
-        req.user = currentUser; // Attach user to request
+      // Get user from database (exclude password)
+      const user = await User.findById(decoded.id).select('-password');
+      
+      // If user exists and is active, add to request
+      if (user && user.isActive !== false) {
+        req.user = user;
       }
     } catch (error) {
-      // Token verification failed, but we'll continue without authentication
+      // Token invalid, continue without auth
     }
     
     next();
   } catch (error) {
+    console.error('Optional auth middleware error:', error);
     next();
   }
 };
 
 /**
- * Protected route middleware - requires authentication
+ * Admin-only middleware
+ * Requires the protect middleware to run first
  */
-exports.protect = async (req, res, next) => {
-  try {
-    let token;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
-
-    if (!token) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'You are not logged in. Please log in to get access'
-      });
-    }
-
-    const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
-    const currentUser = await User.findById(decoded.id);
-
-    if (!currentUser) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'The user belonging to this token no longer exists'
-      });
-    }
-
-    if (currentUser.changedPasswordAfter(decoded.iat)) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'User recently changed password. Please log in again'
-      });
-    }
-
-    req.user = currentUser;
+exports.admin = (req, res, next) => {
+  if (req.user && req.user.role === 'admin') {
     next();
-  } catch (error) {
-    return res.status(401).json({
-      status: 'error',
-      message: 'Authentication failed',
-      error: process.env.NODE_ENV === 'development' ? error.message : {}
-    });
+  } else {
+    res.status(403).json({ message: 'Not authorized - admin access required' });
   }
+};
+
+/**
+ * Role-based authorization middleware
+ * @param {string[]} roles - Array of roles that are allowed access
+ */
+exports.authorize = (roles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Not authorized - authentication required' });
+    }
+    
+    if (roles.includes(req.user.role)) {
+      next();
+    } else {
+      res.status(403).json({ 
+        message: `Not authorized - ${req.user.role} role cannot access this resource` 
+      });
+    }
+  };
 };
 
 /**

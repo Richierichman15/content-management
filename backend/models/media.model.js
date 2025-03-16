@@ -42,6 +42,11 @@ const mediaSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  folder: {
+    type: String,
+    default: '',
+    trim: true
+  },
   categories: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Category'
@@ -62,6 +67,32 @@ const mediaSchema = new mongoose.Schema({
     width: Number,
     height: Number
   },
+  exif: {
+    type: Object,
+    default: {}
+  },
+  optimized: {
+    type: Boolean,
+    default: false
+  },
+  originalSize: {
+    type: Number
+  },
+  variants: [{
+    name: String,
+    url: String,
+    width: Number,
+    height: Number,
+    fileSize: Number,
+    effects: [String]
+  }],
+  usageCount: {
+    type: Number,
+    default: 0
+  },
+  lastUsedAt: {
+    type: Date
+  },
   uploadedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -70,6 +101,20 @@ const mediaSchema = new mongoose.Schema({
   isPublic: {
     type: Boolean,
     default: true
+  },
+  accessibilityText: {
+    type: String,
+    trim: true
+  },
+  focalPoint: {
+    x: {
+      type: Number,
+      default: 0.5
+    },
+    y: {
+      type: Number,
+      default: 0.5
+    }
   }
 }, {
   timestamps: true,
@@ -83,7 +128,8 @@ mediaSchema.index({
   title: 'text', 
   description: 'text', 
   tags: 'text',
-  aiTags: 'text'
+  aiTags: 'text',
+  folder: 'text'
 });
 
 // Virtual for file type (image, video, document, etc.)
@@ -105,6 +151,14 @@ mediaSchema.virtual('fileType').get(function() {
   }
   
   return 'other';
+});
+
+// Pre-save hook to set title from filename if not provided
+mediaSchema.pre('save', function(next) {
+  if (!this.title) {
+    this.title = this.originalFilename.replace(/\.[^/.]+$/, ""); // Remove extension
+  }
+  next();
 });
 
 const Media = mongoose.model('Media', mediaSchema);

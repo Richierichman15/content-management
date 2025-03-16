@@ -23,6 +23,13 @@ router.get('/:id', protect, mediaController.getMediaById);
 router.put('/:id', protect, mediaController.updateMedia);
 router.delete('/:id', protect, mediaController.deleteMedia);
 router.post('/:id/analyze', protect, mediaController.analyzeMedia);
-router.patch('/:id/visibility', protect, mediaController.updateMediaVisibility);
+router.patch('/:id/visibility', protect, mediaController.updateVisibility);
+
+// New enhanced routes for image processing
+router.post('/:id/variants', protect, mediaController.createVariant);
+router.delete('/:id/variants/:variantName', protect, mediaController.deleteVariant);
+
+// Media organization
+router.get('/folders', protect, mediaController.getFolders);
 
 module.exports = router; 

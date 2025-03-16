@@ -17,11 +17,16 @@ const PORT = process.env.PORT || 5000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: false // Disable CSP for the demo
+}));
 app.use(morgan('dev'));
 
 // Static folder for uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Serve static files from public directory
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Import routes
 const authRoutes = require('./routes/auth.routes');
@@ -37,9 +42,9 @@ app.use('/api/content', contentRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/ai', aiRoutes);
 
-// Home route
+// Home route - serve the HTML tester page
 app.get('/', (req, res) => {
-  res.json({ message: 'Welcome to AI-Enhanced CMS API' });
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Error handling middleware
@@ -62,6 +67,7 @@ mongoose.connect(process.env.MONGODB_URI)
     // Start the server after successful database connection
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
+      console.log(`Access the Media API Tester at http://localhost:${PORT}`);
     });
   })
   .catch(err => {
