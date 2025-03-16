@@ -5,8 +5,11 @@ import { toast } from 'react-toastify';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import ContentVersions from '../../components/content/ContentVersions';
 import ContentSchedule from '../../components/content/ContentSchedule';
+import ContentPreview from '../../components/content/ContentPreview';
+import ContentTemplates from '../../components/content/ContentTemplates';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
+import { DocumentTextIcon, DocumentDuplicateIcon, EyeIcon, ClockIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 
 const ContentEditor = () => {
   const { id } = useParams();
@@ -19,6 +22,8 @@ const ContentEditor = () => {
   const [saveWithComment, setSaveWithComment] = useState(false);
   const [versionComment, setVersionComment] = useState('');
   const [scheduledPublish, setScheduledPublish] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [content, setContent] = useState({
     title: '',
     excerpt: '',
@@ -174,6 +179,19 @@ const ContentEditor = () => {
     }
   };
 
+  const handleSelectTemplate = (template) => {
+    setContent({
+      title: '',
+      content: template.content,
+      excerpt: template.excerpt || '',
+      featuredImage: template.featuredImage || '',
+      status: 'draft',
+      tags: template.tags || [],
+    });
+    setShowTemplates(false);
+    toast.success('Template applied successfully');
+  };
+
   if (loading) {
     return <LoadingSpinner />;
   }
@@ -190,6 +208,30 @@ const ContentEditor = () => {
               ? 'Update your existing content'
               : 'Create a new piece of content'}
           </p>
+        </div>
+        
+        <div className="mt-4 sm:mt-0 flex space-x-3">
+          {!isEditing && (
+            <button
+              type="button"
+              onClick={() => setShowTemplates(true)}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            >
+              <DocumentDuplicateIcon className="-ml-1 mr-2 h-5 w-5 text-gray-500" />
+              Use Template
+            </button>
+          )}
+          
+          {isEditing && (
+            <button
+              type="button"
+              onClick={() => setShowPreview(true)}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            >
+              <EyeIcon className="-ml-1 mr-2 h-5 w-5 text-gray-500" />
+              Preview
+            </button>
+          )}
         </div>
       </div>
 
@@ -375,23 +417,37 @@ const ContentEditor = () => {
           </form>
         </div>
         
-        <div className="lg:col-span-1 space-y-6">
-          <ContentSchedule 
-            contentId={id} 
-            currentStatus={content.status}
-            onScheduleUpdate={handleScheduleUpdate}
-            className="bg-white"
-          />
-          
+        <div className="space-y-6">
           {isEditing && (
             <ContentVersions 
               contentId={id} 
               onVersionRestore={handleVersionRestore}
-              className="bg-white"
+              className="bg-white shadow rounded-lg"
             />
           )}
+          
+          <ContentSchedule
+            contentId={id}
+            currentStatus={content.status}
+            onScheduleUpdate={handleScheduleUpdate}
+            className="bg-white shadow rounded-lg"
+          />
         </div>
       </div>
+      
+      {showPreview && isEditing && (
+        <ContentPreview 
+          contentId={id} 
+          onClose={() => setShowPreview(false)} 
+        />
+      )}
+      
+      {showTemplates && !isEditing && (
+        <ContentTemplates 
+          onSelectTemplate={handleSelectTemplate} 
+          onClose={() => setShowTemplates(false)} 
+        />
+      )}
     </div>
   );
 };

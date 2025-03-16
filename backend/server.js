@@ -51,6 +51,10 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Start the scheduler service
+const schedulerService = require('./services/scheduler.service');
+schedulerService.start();
+
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => {

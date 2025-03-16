@@ -53,6 +53,19 @@ const contentSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  scheduledPublish: {
+    type: Date,
+    default: null
+  },
+  isTemplate: {
+    type: Boolean,
+    default: false
+  },
+  templateCategory: {
+    type: String,
+    enum: ['blog', 'newsletter', 'social', 'product', 'page', 'email', 'other'],
+    default: 'other'
+  },
   aiGenerated: {
     type: Boolean,
     default: false

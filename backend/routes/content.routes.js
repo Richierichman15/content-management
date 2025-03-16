@@ -37,4 +37,19 @@ router.post('/categories', contentController.createCategory);
 router.put('/categories/:id', contentController.updateCategory);
 router.delete('/categories/:id', contentController.deleteCategory);
 
+// Versioning
+router.get('/:id/versions', contentController.getContentVersions);
+router.post('/:id/versions/:versionId/restore', contentController.restoreContentVersion);
+
+// Scheduling
+router.route('/:id/schedule')
+  .get(contentController.getContentSchedule)
+  .post(contentController.scheduleContent)
+  .delete(contentController.deleteSchedule);
+
+// Templates
+router.get('/templates', contentController.getAllTemplates);
+router.post('/templates', contentController.createTemplate);
+router.post('/templates/:id/use', contentController.useTemplate);
+
 module.exports = router; 
