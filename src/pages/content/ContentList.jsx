@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, PencilIcon, TrashIcon, EyeIcon } from '@heroicons/react/24/outline';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from 'react-toastify';
+import ContentPreview from '../../components/content/ContentPreview';
 
 const ContentList = () => {
   const [contents, setContents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all'); // all, published, draft
   const [sortBy, setSortBy] = useState('newest'); // newest, oldest, title
+  const [previewContent, setPreviewContent] = useState(null);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -57,6 +59,14 @@ const ContentList = () => {
     } catch (error) {
       toast.error(error.message);
     }
+  };
+
+  const handlePreview = (contentId) => {
+    setPreviewContent(contentId);
+  };
+
+  const closePreview = () => {
+    setPreviewContent(null);
   };
 
   const getStatusBadgeClass = (status) => {
@@ -180,6 +190,13 @@ const ContentList = () => {
                             </td>
                             <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                               <div className="flex justify-end space-x-2">
+                                <button
+                                  onClick={() => handlePreview(content._id)}
+                                  className="text-gray-600 hover:text-gray-900"
+                                  aria-label="Preview content"
+                                >
+                                  <EyeIcon className="h-5 w-5" />
+                                </button>
                                 <Link
                                   to={`/content/edit/${content._id}`}
                                   className="text-indigo-600 hover:text-indigo-900"
@@ -216,6 +233,13 @@ const ContentList = () => {
           )}
         </div>
       </div>
+
+      {previewContent && (
+        <ContentPreview 
+          contentId={previewContent} 
+          onClose={closePreview} 
+        />
+      )}
     </div>
   );
 };

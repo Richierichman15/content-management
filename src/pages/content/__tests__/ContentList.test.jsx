@@ -5,6 +5,16 @@ import { toast } from 'react-toastify';
 import ContentList from '../ContentList';
 import { AuthProvider } from '../../../context/AuthContext';
 
+// Mock content preview component
+vi.mock('../../../components/content/ContentPreview', () => ({
+  default: ({ contentId, onClose }) => (
+    <div data-testid="content-preview">
+      <span>Preview for content ID: {contentId}</span>
+      <button onClick={onClose}>Close Preview</button>
+    </div>
+  ),
+}));
+
 // Mock the toast notifications
 vi.mock('react-toastify', () => ({
   toast: {
@@ -163,5 +173,57 @@ describe('ContentList', () => {
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('Failed to fetch content');
     });
+  });
+
+  it('opens content preview when preview button is clicked', async () => {
+    mockFetch.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ data: mockContent }),
+      })
+    );
+
+    renderWithRouter(<ContentList />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Content 1')).toBeInTheDocument();
+    });
+
+    // Find all buttons - the preview button should be the first in each action group
+    const previewButtons = screen.getAllByRole('button', { name: /preview content/i });
+    fireEvent.click(previewButtons[0]);
+
+    // Check if preview is shown with correct content id
+    expect(screen.getByTestId('content-preview')).toBeInTheDocument();
+    expect(screen.getByText('Preview for content ID: 1')).toBeInTheDocument();
+  });
+
+  it('closes content preview when close button is clicked', async () => {
+    mockFetch.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ data: mockContent }),
+      })
+    );
+
+    renderWithRouter(<ContentList />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Content 1')).toBeInTheDocument();
+    });
+
+    // Open preview
+    const previewButtons = screen.getAllByRole('button', { name: /preview content/i });
+    fireEvent.click(previewButtons[0]);
+
+    // Verify preview is open
+    expect(screen.getByTestId('content-preview')).toBeInTheDocument();
+
+    // Close preview
+    const closeButton = screen.getByText('Close Preview');
+    fireEvent.click(closeButton);
+
+    // Verify preview is closed
+    expect(screen.queryByTestId('content-preview')).not.toBeInTheDocument();
   });
 }); 
