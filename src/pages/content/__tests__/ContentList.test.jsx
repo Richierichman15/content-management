@@ -99,7 +99,7 @@ describe('ContentList', () => {
       expect(screen.getByText('Test Content 1')).toBeInTheDocument();
     });
 
-    const filterSelect = screen.getByRole('combobox');
+    const filterSelect = screen.getAllByRole('combobox')[0]; // Get the first select element
     fireEvent.change(filterSelect, { target: { value: 'published' } });
 
     await waitFor(() => {

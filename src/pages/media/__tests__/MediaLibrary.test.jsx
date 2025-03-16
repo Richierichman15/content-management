@@ -100,12 +100,6 @@ describe('MediaLibrary', () => {
               },
             }),
         })
-      )
-      .mockImplementationOnce(() =>
-        Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ data: [...mockMedia] }),
-        })
       );
 
     renderWithRouter(<MediaLibrary />);
@@ -158,7 +152,12 @@ describe('MediaLibrary', () => {
     fireEvent.click(deleteButtons[0]);
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(mockFetch).toHaveBeenCalledWith('/api/media/1', {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
       expect(toast.success).toHaveBeenCalledWith('File deleted successfully');
     });
 
