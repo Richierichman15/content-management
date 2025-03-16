@@ -20,6 +20,7 @@
   "license": "MIT",
   "dependencies": {
     "@heroicons/react": "^2.1.1",
+    "@tailwindcss/aspect-ratio": "^0.4.2",
     "axios": "^1.6.3",
     "chart.js": "^4.4.1",
     "formik": "^2.4.5",
