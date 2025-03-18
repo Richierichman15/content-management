@@ -149,4 +149,83 @@ exports.deleteUser = async (req, res) => {
   } catch (error) {
     errorHandler(res, error);
   }
+};
+
+/**
+ * Get user settings
+ * @route GET /api/users/settings
+ * @access Private
+ */
+exports.getUserSettings = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('settings');
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // If no settings yet, return defaults
+    if (!user.settings) {
+      const defaultSettings = {
+        emailNotifications: true,
+        contentNotifications: true,
+        mediaNotifications: true,
+        language: 'en',
+        timezone: 'UTC',
+        dateFormat: 'MM/DD/YYYY',
+        theme: 'light'
+      };
+      
+      return res.json(defaultSettings);
+    }
+    
+    res.json(user.settings);
+  } catch (error) {
+    errorHandler(res, error);
+  }
+};
+
+/**
+ * Update user settings
+ * @route PUT /api/users/settings
+ * @access Private
+ */
+exports.updateUserSettings = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Initialize settings if they don't exist
+    if (!user.settings) {
+      user.settings = {};
+    }
+    
+    // Update settings
+    const { 
+      emailNotifications, 
+      contentNotifications, 
+      mediaNotifications, 
+      language, 
+      timezone, 
+      dateFormat,
+      theme
+    } = req.body;
+    
+    if (emailNotifications !== undefined) user.settings.emailNotifications = emailNotifications;
+    if (contentNotifications !== undefined) user.settings.contentNotifications = contentNotifications;
+    if (mediaNotifications !== undefined) user.settings.mediaNotifications = mediaNotifications;
+    if (language) user.settings.language = language;
+    if (timezone) user.settings.timezone = timezone;
+    if (dateFormat) user.settings.dateFormat = dateFormat;
+    if (theme) user.settings.theme = theme;
+    
+    await user.save();
+    
+    res.json(user.settings);
+  } catch (error) {
+    errorHandler(res, error);
+  }
 }; 

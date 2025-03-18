@@ -551,80 +551,70 @@ exports.restoreContentVersion = async (req, res) => {
 };
 
 /**
- * Schedule content publication/unpublication
- * @route POST /api/content/:id/schedule
- * @access Private
- */
-exports.scheduleContent = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { date, action } = req.body;
-
-    // Validate inputs
-    if (!date) {
-      return res.status(400).json({ message: 'Date is required' });
-    }
-
-    if (!['publish', 'unpublish'].includes(action)) {
-      return res.status(400).json({ message: 'Action must be either "publish" or "unpublish"' });
-    }
-
-    // Check if content exists
-    const content = await Content.findById(id);
-    if (!content) {
-      return res.status(404).json({ message: 'Content not found' });
-    }
-
-    // Check authorization
-    if (content.author.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Not authorized to schedule this content' });
-    }
-
-    // Schedule the content
-    const schedulerService = require('../services/scheduler.service');
-    const scheduled = await schedulerService.scheduleContent(id, new Date(date), action);
-
-    res.json({
-      message: `Content ${action} scheduled for ${new Date(date).toLocaleString()}`,
-      scheduled
-    });
-  } catch (error) {
-    console.error(`Error scheduling content:`, error);
-    res.status(500).json({
-      message: 'Error scheduling content',
-      error: error.message
-    });
-  }
-};
-
-/**
  * Get content schedule
  * @route GET /api/content/:id/schedule
  * @access Private
  */
-exports.getContentSchedule = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Check if content exists
-    const content = await Content.findById(id);
-    if (!content) {
-      return res.status(404).json({ message: 'Content not found' });
-    }
-
-    // Get schedule
-    const schedulerService = require('../services/scheduler.service');
-    const schedule = await schedulerService.getContentSchedule(id);
-
-    res.json(schedule);
-  } catch (error) {
-    console.error('Error getting content schedule:', error);
-    res.status(500).json({
-      message: 'Error getting content schedule',
-      error: error.message
-    });
+exports.getContentSchedule = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  const content = await Content.findById(id);
+  
+  if (!content) {
+    throw new NotFoundError('Content');
   }
-};
+  
+  const schedulerService = require('../services/scheduler.service');
+  const schedule = await schedulerService.getContentSchedule(id);
+  
+  res.json({
+    message: 'Schedule retrieved successfully',
+    schedule
+  });
+});
+
+/**
+ * Schedule content publication/unpublication
+ * @route POST /api/content/:id/schedule
+ * @access Private
+ */
+exports.scheduleContent = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { publishDate, unpublishDate } = req.body;
+  
+  if (!publishDate && !unpublishDate) {
+    throw new ValidationError('Either publishDate or unpublishDate is required');
+  }
+  
+  const content = await Content.findById(id);
+  
+  if (!content) {
+    throw new NotFoundError('Content');
+  }
+  
+  // Check if user has permission
+  if (content.author.toString() !== req.user.id && 
+      req.user.role !== 'admin' && 
+      req.user.role !== 'editor') {
+    throw new AuthorizationError('Not authorized to schedule this content');
+  }
+  
+  const schedulerService = require('../services/scheduler.service');
+  
+  // Schedule publish if provided
+  if (publishDate) {
+    await schedulerService.scheduleContent(id, publishDate, 'publish');
+  }
+  
+  // Schedule unpublish if provided
+  if (unpublishDate) {
+    await schedulerService.scheduleContent(id, unpublishDate, 'unpublish');
+  }
+  
+  res.json({
+    message: 'Content scheduled successfully'
+  });
+});
 
 /**
  * Delete content schedule
@@ -868,4 +858,564 @@ exports.createContentVersion = async (contentId, comment, userId) => {
     console.error('Error creating content version:', error);
     return false;
   }
-}; 
+};
+
+/**
+ * Get content by slug
+ * @route GET /api/content/published/:slug
+ * @access Public
+ */
+exports.getContent = asyncHandler(async (req, res) => {
+  const content = await Content.findOne({ slug: req.params.slug })
+                               .populate('author', 'firstName lastName')
+                               .populate('categories', 'name');
+  
+  if (!content) {
+    throw new NotFoundError('Content');
+  }
+  
+  // For non-published content, check permissions
+  if (content.status !== 'published') {
+    if (!req.user) {
+      throw new AuthorizationError('Not authorized to view this content');
+    }
+    
+    if (content.author.toString() !== req.user.id && 
+        req.user.role !== 'admin' && 
+        req.user.role !== 'editor') {
+      throw new AuthorizationError('Not authorized to view this content');
+    }
+  }
+  
+  res.status(200).json({
+    status: 'success',
+    data: {
+      content
+    }
+  });
+});
+
+/**
+ * Get all templates
+ * @route GET /api/content/templates
+ * @access Private
+ */
+exports.getTemplates = asyncHandler(async (req, res) => {
+  const templates = await Content.find({ isTemplate: true })
+                                .select('title description createdAt updatedAt')
+                                .sort({ updatedAt: -1 });
+  
+  res.status(200).json({
+    status: 'success',
+    data: {
+      templates
+    }
+  });
+});
+
+/**
+ * Create a template
+ * @route POST /api/content/templates
+ * @access Private
+ */
+exports.createTemplate = asyncHandler(async (req, res) => {
+  const {
+    title,
+    content,
+    description,
+    structure
+  } = req.body;
+
+  // Validate required fields
+  if (!title) {
+    throw new ValidationError('Title is required', { title: 'Title field cannot be empty' });
+  }
+
+  // Generate slug
+  const slug = title
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-') + '-template';
+
+  // Create new template
+  const newTemplate = new Content({
+    title,
+    content: content || '',
+    description: description || '',
+    slug,
+    status: 'published',
+    author: req.user.id,
+    isTemplate: true,
+    structure: structure || {}
+  });
+
+  // Save to database
+  await newTemplate.save();
+
+  res.status(201).json({
+    message: 'Template created successfully',
+    template: newTemplate
+  });
+});
+
+/**
+ * Use a template
+ * @route POST /api/content/templates/:id/use
+ * @access Private
+ */
+exports.useTemplate = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const template = await Content.findOne({ _id: id, isTemplate: true });
+  
+  if (!template) {
+    throw new NotFoundError('Template');
+  }
+  
+  res.status(200).json({
+    status: 'success',
+    data: {
+      template: {
+        id: template._id,
+        title: template.title,
+        content: template.content,
+        structure: template.structure
+      }
+    }
+  });
+});
+
+/**
+ * Restore content version
+ * @route POST /api/content/:id/versions/:versionId/restore
+ * @access Private
+ */
+exports.restoreVersion = asyncHandler(async (req, res) => {
+  const { id, versionId } = req.params;
+  
+  // Check if content exists and user has access
+  const content = await Content.findById(id);
+  if (!content) {
+    throw new NotFoundError('Content');
+  }
+  
+  // Check if user has permission to restore
+  if (content.author.toString() !== req.user.id && 
+      req.user.role !== 'admin' && 
+      req.user.role !== 'editor') {
+    throw new AuthorizationError('Not authorized to restore versions for this content');
+  }
+  
+  // Get the version
+  const ContentVersion = mongoose.model('ContentVersion');
+  const version = await ContentVersion.findById(versionId);
+  
+  if (!version || version.contentId.toString() !== id) {
+    throw new NotFoundError('Version');
+  }
+  
+  // Create a new version of the current state before restoring
+  await this.createContentVersion(
+    id, 
+    `State before restoring to version from ${new Date(version.createdAt).toLocaleDateString()}`, 
+    req.user.id
+  );
+  
+  // Restore the version data
+  const updatedContent = await Content.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        title: version.data.title,
+        content: version.data.content,
+        excerpt: version.data.excerpt,
+        updatedAt: Date.now()
+      }
+    },
+    { new: true, runValidators: true }
+  );
+  
+  res.json({
+    message: 'Version restored successfully',
+    content: updatedContent
+  });
+});
+
+/**
+ * Get categories
+ * @route GET /api/content/categories
+ * @access Public
+ */
+exports.getCategories = asyncHandler(async (req, res) => {
+  const categories = await Category.find().sort({ name: 1 });
+  
+  res.status(200).json({
+    status: 'success',
+    data: {
+      categories
+    }
+  });
+});
+
+/**
+ * Get category by slug
+ * @route GET /api/content/categories/:slug
+ * @access Public
+ */
+exports.getCategoryBySlug = asyncHandler(async (req, res) => {
+  const category = await Category.findOne({ slug: req.params.slug });
+  
+  if (!category) {
+    throw new NotFoundError('Category');
+  }
+  
+  res.status(200).json({
+    status: 'success',
+    data: {
+      category
+    }
+  });
+});
+
+/**
+ * Update content status
+ * @route PATCH /api/content/:id/status
+ * @access Private
+ */
+exports.updateContentStatus = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  
+  if (!status) {
+    throw new ValidationError('Status is required');
+  }
+  
+  if (!['draft', 'published', 'archived'].includes(status)) {
+    throw new ValidationError('Invalid status value');
+  }
+  
+  const content = await Content.findById(id);
+  
+  if (!content) {
+    throw new NotFoundError('Content');
+  }
+  
+  // Check if user has permission
+  if (content.author.toString() !== req.user.id && 
+      req.user.role !== 'admin' && 
+      req.user.role !== 'editor') {
+    throw new AuthorizationError('Not authorized to update status for this content');
+  }
+  
+  content.status = status;
+  content.updatedAt = Date.now();
+  
+  await content.save();
+  
+  res.json({
+    message: 'Status updated successfully',
+    content
+  });
+});
+
+/**
+ * Analyze content with AI
+ * @route POST /api/content/:id/analyze
+ * @access Private
+ */
+exports.analyzeContent = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  const content = await Content.findById(id);
+  
+  if (!content) {
+    throw new NotFoundError('Content');
+  }
+  
+  // Mock AI analysis response
+  const analysis = {
+    readabilityScore: Math.floor(Math.random() * 100),
+    suggestions: [
+      'Consider using shorter paragraphs for better readability',
+      'The content could benefit from more subheadings',
+      'Add more descriptive language to engage readers'
+    ],
+    seoScore: Math.floor(Math.random() * 100),
+    seoSuggestions: [
+      'Include more keywords related to your topic',
+      'Consider adding internal links to other relevant content',
+      'Make sure your content has proper heading structure'
+    ]
+  };
+  
+  res.json({
+    message: 'Content analyzed successfully',
+    analysis
+  });
+});
+
+/**
+ * Get content suggestions
+ * @route GET /api/content/:id/suggestions
+ * @access Private
+ */
+exports.getContentSuggestions = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  const content = await Content.findById(id);
+  
+  if (!content) {
+    throw new NotFoundError('Content');
+  }
+  
+  // Mock suggestions
+  const suggestions = [
+    {
+      id: '1',
+      type: 'seo',
+      text: 'Consider adding more descriptive tags to improve searchability',
+      priority: 'high'
+    },
+    {
+      id: '2',
+      type: 'content',
+      text: 'This section could benefit from a supporting image',
+      priority: 'medium'
+    },
+    {
+      id: '3',
+      type: 'structure',
+      text: 'Consider breaking this long paragraph into smaller chunks',
+      priority: 'medium'
+    }
+  ];
+  
+  res.json({
+    message: 'Suggestions retrieved successfully',
+    suggestions
+  });
+});
+
+/**
+ * Apply a content suggestion
+ * @route POST /api/content/:id/suggestions/:suggestionId/apply
+ * @access Private
+ */
+exports.applySuggestion = asyncHandler(async (req, res) => {
+  const { id, suggestionId } = req.params;
+  
+  const content = await Content.findById(id);
+  
+  if (!content) {
+    throw new NotFoundError('Content');
+  }
+  
+  // In a real implementation, this would apply the suggestion
+  // Here we just acknowledge it
+  
+  res.json({
+    message: 'Suggestion applied successfully',
+    suggestionId
+  });
+});
+
+/**
+ * Get content revisions
+ * @route GET /api/content/:id/revisions
+ * @access Private
+ */
+exports.getContentRevisions = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  const content = await Content.findById(id);
+  
+  if (!content) {
+    throw new NotFoundError('Content');
+  }
+  
+  // Mock revisions
+  const revisions = [
+    {
+      id: '1',
+      date: new Date(Date.now() - 86400000 * 3),
+      author: 'John Doe',
+      changes: 'Updated introduction and added new section'
+    },
+    {
+      id: '2',
+      date: new Date(Date.now() - 86400000 * 2),
+      author: 'Jane Smith',
+      changes: 'Fixed typos and improved formatting'
+    }
+  ];
+  
+  res.json({
+    message: 'Revisions retrieved successfully',
+    revisions
+  });
+});
+
+/**
+ * Restore a content revision
+ * @route POST /api/content/:id/revisions/:revisionId/restore
+ * @access Private
+ */
+exports.restoreRevision = asyncHandler(async (req, res) => {
+  const { id, revisionId } = req.params;
+  
+  const content = await Content.findById(id);
+  
+  if (!content) {
+    throw new NotFoundError('Content');
+  }
+  
+  // In a real implementation, this would restore from a revision
+  // Here we just acknowledge it
+  
+  res.json({
+    message: 'Revision restored successfully',
+    revisionId
+  });
+});
+
+/**
+ * Create category
+ * @route POST /api/content/categories
+ * @access Private/Admin
+ */
+exports.createCategory = asyncHandler(async (req, res) => {
+  const { name, description, slug } = req.body;
+  
+  if (!name) {
+    throw new ValidationError('Name is required');
+  }
+  
+  // Generate slug if not provided
+  let categorySlug = slug;
+  if (!categorySlug) {
+    categorySlug = name
+      .toLowerCase()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-');
+  }
+  
+  // Check if slug is unique
+  const existingCategory = await Category.findOne({ slug: categorySlug });
+  if (existingCategory) {
+    throw new ValidationError('Category with this slug already exists');
+  }
+  
+  const newCategory = new Category({
+    name,
+    description,
+    slug: categorySlug,
+    createdBy: req.user.id
+  });
+  
+  await newCategory.save();
+  
+  res.status(201).json({
+    message: 'Category created successfully',
+    category: newCategory
+  });
+});
+
+/**
+ * Update category
+ * @route PUT /api/content/categories/:id
+ * @access Private/Admin
+ */
+exports.updateCategory = asyncHandler(async (req, res) => {
+  const { name, description, slug } = req.body;
+  const { id } = req.params;
+  
+  const category = await Category.findById(id);
+  
+  if (!category) {
+    throw new NotFoundError('Category');
+  }
+  
+  // If slug is changing, check uniqueness
+  if (slug && slug !== category.slug) {
+    const slugExists = await Category.findOne({ slug, _id: { $ne: id } });
+    if (slugExists) {
+      throw new ValidationError('Category with this slug already exists');
+    }
+  }
+  
+  category.name = name || category.name;
+  category.description = description !== undefined ? description : category.description;
+  category.slug = slug || category.slug;
+  category.updatedAt = Date.now();
+  
+  await category.save();
+  
+  res.json({
+    message: 'Category updated successfully',
+    category
+  });
+});
+
+/**
+ * Delete category
+ * @route DELETE /api/content/categories/:id
+ * @access Private/Admin
+ */
+exports.deleteCategory = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  const category = await Category.findById(id);
+  
+  if (!category) {
+    throw new NotFoundError('Category');
+  }
+  
+  // Check if category is in use
+  const inUseCount = await Content.countDocuments({ categories: id });
+  
+  if (inUseCount > 0) {
+    throw new ValidationError('Cannot delete category that is in use by content');
+  }
+  
+  await Category.findByIdAndDelete(id);
+  
+  res.json({
+    message: 'Category deleted successfully'
+  });
+});
+
+/**
+ * Unschedule content
+ * @route DELETE /api/content/:id/schedule
+ * @access Private
+ */
+exports.unscheduleContent = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { type } = req.query; // 'publish', 'unpublish', or both if not specified
+  
+  const content = await Content.findById(id);
+  
+  if (!content) {
+    throw new NotFoundError('Content');
+  }
+  
+  // Check if user has permission
+  if (content.author.toString() !== req.user.id && 
+      req.user.role !== 'admin' && 
+      req.user.role !== 'editor') {
+    throw new AuthorizationError('Not authorized to unschedule this content');
+  }
+  
+  const schedulerService = require('../services/scheduler.service');
+  
+  if (!type || type === 'publish') {
+    await schedulerService.removeSchedule(id, 'publish');
+  }
+  
+  if (!type || type === 'unpublish') {
+    await schedulerService.removeSchedule(id, 'unpublish');
+  }
+  
+  res.json({
+    message: 'Schedule removed successfully'
+  });
+}); 

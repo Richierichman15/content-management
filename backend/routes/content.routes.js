@@ -12,44 +12,44 @@ router.use(optionalAuth);
 // Public routes
 router.get('/published', contentController.getAllContent);
 router.get('/published/:slug', contentController.getContent);
-router.get('/categories', contentController.getAllContent);
-router.get('/categories/:slug', contentController.getContent);
-router.get('/search', contentController.getAllContent);
+router.get('/categories', contentController.getCategories);
+router.get('/categories/:slug', contentController.getCategoryBySlug);
+router.get('/search', contentController.searchContent);
 
 // Content CRUD operations - protected routes
 router.get('/', contentController.getAllContent);
-router.post('/', protect, uploadSingle, contentController.getAllContent);
+router.post('/', protect, uploadSingle, contentController.createContent);
 router.get('/:id', contentController.getContent);
-router.put('/:id', protect, uploadSingle, contentController.getAllContent);
-router.delete('/:id', protect, contentController.getAllContent);
+router.put('/:id', protect, uploadSingle, contentController.updateContent);
+router.delete('/:id', protect, contentController.deleteContent);
 
 // Content special operations - protected routes
-router.patch('/:id/status', protect, contentController.getAllContent);
-router.post('/:id/analyze', protect, contentController.getAllContent);
-router.get('/:id/suggestions', protect, contentController.getAllContent);
-router.post('/:id/suggestions/:suggestionId/apply', protect, contentController.getAllContent);
-router.get('/:id/revisions', protect, contentController.getAllContent);
-router.post('/:id/revisions/:revisionId/restore', protect, contentController.getAllContent);
+router.patch('/:id/status', protect, contentController.updateContentStatus);
+router.post('/:id/analyze', protect, contentController.analyzeContent);
+router.get('/:id/suggestions', protect, contentController.getContentSuggestions);
+router.post('/:id/suggestions/:suggestionId/apply', protect, contentController.applySuggestion);
+router.get('/:id/revisions', protect, contentController.getContentRevisions);
+router.post('/:id/revisions/:revisionId/restore', protect, contentController.restoreRevision);
 
 // Category operations - restricted to admins and editors
 router.use('/categories', protect);
-router.post('/categories', contentController.getAllContent);
-router.put('/categories/:id', contentController.getAllContent);
-router.delete('/categories/:id', contentController.getAllContent);
+router.post('/categories', contentController.createCategory);
+router.put('/categories/:id', contentController.updateCategory);
+router.delete('/categories/:id', contentController.deleteCategory);
 
 // Versioning
-router.get('/:id/versions', contentController.getAllContent);
-router.post('/:id/versions/:versionId/restore', contentController.getAllContent);
+router.get('/:id/versions', contentController.getContentVersions);
+router.post('/:id/versions/:versionId/restore', contentController.restoreVersion);
 
 // Scheduling
 router.route('/:id/schedule')
-  .get(contentController.getAllContent)
-  .post(contentController.getAllContent)
-  .delete(contentController.getAllContent);
+  .get(contentController.getContentSchedule)
+  .post(contentController.scheduleContent)
+  .delete(contentController.unscheduleContent);
 
 // Templates
-router.get('/templates', contentController.getAllContent);
-router.post('/templates', contentController.getAllContent);
-router.post('/templates/:id/use', contentController.getAllContent);
+router.get('/templates', contentController.getTemplates);
+router.post('/templates', contentController.createTemplate);
+router.post('/templates/:id/use', contentController.useTemplate);
 
 module.exports = router; 

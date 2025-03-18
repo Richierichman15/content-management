@@ -14,6 +14,8 @@ router.use(protect);
 // Routes for all authenticated users
 router.get('/profile', userController.getUserProfile);
 router.put('/profile', userController.updateUserProfile);
+router.get('/settings', userController.getUserSettings);
+router.put('/settings', userController.updateUserSettings);
 
 // Admin-only routes
 router.use(admin);

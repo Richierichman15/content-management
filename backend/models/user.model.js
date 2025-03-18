@@ -47,6 +47,18 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  settings: {
+    type: Object,
+    default: {
+      emailNotifications: true,
+      contentNotifications: true,
+      mediaNotifications: true,
+      language: 'en',
+      timezone: 'UTC',
+      dateFormat: 'MM/DD/YYYY',
+      theme: 'light'
+    }
+  },
   passwordChangedAt: Date,
   passwordResetToken: String,
   passwordResetExpires: Date
