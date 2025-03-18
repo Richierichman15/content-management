@@ -7,9 +7,10 @@ import ContentVersions from '../../components/content/ContentVersions';
 import ContentSchedule from '../../components/content/ContentSchedule';
 import ContentPreview from '../../components/content/ContentPreview';
 import ContentTemplates from '../../components/content/ContentTemplates';
+import AIAssistant from '../../components/content/AIAssistant';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-import { DocumentTextIcon, DocumentDuplicateIcon, EyeIcon, ClockIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import { DocumentTextIcon, DocumentDuplicateIcon, EyeIcon, ClockIcon, ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
 const ContentEditor = () => {
   const { id } = useParams();
@@ -24,6 +25,7 @@ const ContentEditor = () => {
   const [scheduledPublish, setScheduledPublish] = useState(null);
   const [showPreview, setShowPreview] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [content, setContent] = useState({
     title: '',
     excerpt: '',
@@ -192,6 +194,35 @@ const ContentEditor = () => {
     toast.success('Template applied successfully');
   };
 
+  // AI Assistant handlers
+  const handleContentUpdate = (newContent) => {
+    setContent(prev => ({
+      ...prev,
+      content: newContent
+    }));
+  };
+
+  const handleExcerptUpdate = (newExcerpt) => {
+    setContent(prev => ({
+      ...prev,
+      excerpt: newExcerpt
+    }));
+  };
+
+  const handleTitleUpdate = (newTitle) => {
+    setContent(prev => ({
+      ...prev,
+      title: newTitle
+    }));
+  };
+
+  const handleTagsUpdate = (newTags) => {
+    setContent(prev => ({
+      ...prev,
+      tags: newTags
+    }));
+  };
+
   if (loading) {
     return <LoadingSpinner />;
   }
@@ -211,6 +242,15 @@ const ContentEditor = () => {
         </div>
         
         <div className="mt-4 sm:mt-0 flex space-x-3">
+          <button
+            type="button"
+            onClick={() => setShowAIAssistant(!showAIAssistant)}
+            className="inline-flex items-center px-4 py-2 border border-indigo-300 shadow-sm text-sm font-medium rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+          >
+            <SparklesIcon className="-ml-1 mr-2 h-5 w-5 text-indigo-500" />
+            AI Assistant
+          </button>
+
           {!isEditing && (
             <button
               type="button"
@@ -252,31 +292,12 @@ const ContentEditor = () => {
                       type="text"
                       name="title"
                       id="title"
-                      required
                       value={content.title}
                       onChange={(e) =>
-                        setContent((prev) => ({ ...prev, title: e.target.value }))
+                        setContent({ ...content, title: e.target.value })
                       }
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="excerpt"
-                      className="block text-sm font-medium text-gray-700"
-                    >
-                      Excerpt
-                    </label>
-                    <textarea
-                      id="excerpt"
-                      name="excerpt"
-                      rows={3}
-                      value={content.excerpt}
-                      onChange={(e) =>
-                        setContent((prev) => ({ ...prev, excerpt: e.target.value }))
-                      }
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      required
                     />
                   </div>
 
@@ -292,11 +313,30 @@ const ContentEditor = () => {
                         theme="snow"
                         value={content.content}
                         onChange={(value) =>
-                          setContent((prev) => ({ ...prev, content: value }))
+                          setContent({ ...content, content: value })
                         }
-                        className="h-64"
+                        style={{ height: '300px', marginBottom: '50px' }}
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="excerpt"
+                      className="block text-sm font-medium text-gray-700"
+                    >
+                      Excerpt
+                    </label>
+                    <textarea
+                      id="excerpt"
+                      name="excerpt"
+                      rows={3}
+                      value={content.excerpt}
+                      onChange={(e) =>
+                        setContent({ ...content, excerpt: e.target.value })
+                      }
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    ></textarea>
                   </div>
 
                   <div>
@@ -306,22 +346,27 @@ const ContentEditor = () => {
                     >
                       Featured Image
                     </label>
-                    <div className="mt-1 flex items-center space-x-4">
-                      {content.featuredImage && (
+                    {content.featuredImage && (
+                      <div className="mt-2 mb-4">
                         <img
                           src={content.featuredImage}
                           alt="Featured"
-                          className="h-32 w-32 object-cover rounded-lg"
+                          className="h-48 w-auto object-cover rounded-md"
                         />
-                      )}
-                      <input
-                        type="file"
-                        id="featuredImage"
-                        accept="image/*"
-                        onChange={handleImageUpload}
-                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                      />
-                    </div>
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      id="featuredImage"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      className="mt-1 block w-full text-sm text-gray-500
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-md file:border-0
+                        file:text-sm file:font-medium
+                        file:bg-indigo-50 file:text-indigo-700
+                        hover:file:bg-indigo-100"
+                    />
                   </div>
 
                   <div>
@@ -329,7 +374,7 @@ const ContentEditor = () => {
                       htmlFor="tags"
                       className="block text-sm font-medium text-gray-700"
                     >
-                      Tags (comma-separated)
+                      Tags (comma separated)
                     </label>
                     <input
                       type="text"
@@ -353,99 +398,123 @@ const ContentEditor = () => {
                       name="status"
                       value={content.status}
                       onChange={(e) =>
-                        setContent((prev) => ({ ...prev, status: e.target.value }))
+                        setContent({ ...content, status: e.target.value })
                       }
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                     >
                       <option value="draft">Draft</option>
                       <option value="published">Published</option>
+                      <option value="archived">Archived</option>
                     </select>
                   </div>
-                </div>
-              </div>
-              
-              {isEditing && (
-                <div className="px-4 py-3 bg-gray-50 text-right sm:px-6 border-t border-gray-200">
-                  <div className="flex items-center justify-end space-x-3">
+
+                  {isEditing && (
                     <div className="flex items-center">
                       <input
                         id="saveWithComment"
                         name="saveWithComment"
                         type="checkbox"
                         checked={saveWithComment}
-                        onChange={(e) => setSaveWithComment(e.target.checked)}
+                        onChange={() => setSaveWithComment(!saveWithComment)}
                         className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
                       />
-                      <label htmlFor="saveWithComment" className="ml-2 block text-sm text-gray-900">
-                        Save as new version
+                      <label
+                        htmlFor="saveWithComment"
+                        className="ml-2 block text-sm text-gray-900"
+                      >
+                        Add version comment
                       </label>
                     </div>
-                    
-                    {saveWithComment && (
+                  )}
+
+                  {isEditing && saveWithComment && (
+                    <div>
+                      <label
+                        htmlFor="versionComment"
+                        className="block text-sm font-medium text-gray-700"
+                      >
+                        Version Comment
+                      </label>
                       <input
                         type="text"
-                        placeholder="Version comment (optional)"
+                        name="versionComment"
+                        id="versionComment"
                         value={versionComment}
                         onChange={(e) => setVersionComment(e.target.value)}
-                        className="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-64 sm:text-sm border-gray-300 rounded-md"
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                        placeholder="Describe what changed in this version"
                       />
-                    )}
-                    
-                    <button
-                      type="submit"
-                      disabled={saving}
-                      className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-                    >
-                      {saving ? 'Saving...' : 'Save'}
-                    </button>
-                  </div>
+                    </div>
+                  )}
                 </div>
-              )}
-              
-              {!isEditing && (
-                <div className="px-4 py-3 bg-gray-50 text-right sm:px-6 border-t border-gray-200">
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-                  >
-                    {saving ? 'Creating...' : 'Create Content'}
-                  </button>
-                </div>
-              )}
+              </div>
+              <div className="px-4 py-3 bg-gray-50 text-right sm:px-6">
+                <button
+                  type="button"
+                  onClick={() => navigate('/content')}
+                  className="mr-3 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                >
+                  {saving ? (
+                    <ArrowPathIcon className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" />
+                  ) : null}
+                  {saving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
             </div>
           </form>
         </div>
         
-        <div className="space-y-6">
-          {isEditing && (
-            <ContentVersions 
-              contentId={id} 
-              onVersionRestore={handleVersionRestore}
-              className="bg-white shadow rounded-lg"
+        <div>
+          {/* Show AI Assistant if toggled */}
+          {showAIAssistant && (
+            <AIAssistant 
+              content={content}
+              onContentUpdate={handleContentUpdate}
+              onExcerptUpdate={handleExcerptUpdate}
+              onTitleUpdate={handleTitleUpdate}
+              onTagsUpdate={handleTagsUpdate}
             />
           )}
           
-          <ContentSchedule
-            contentId={id}
-            currentStatus={content.status}
-            onScheduleUpdate={handleScheduleUpdate}
-            className="bg-white shadow rounded-lg"
-          />
+          {/* Version history for existing content */}
+          {isEditing && (
+            <ContentVersions
+              contentId={id}
+              onRestore={handleVersionRestore}
+            />
+          )}
+          
+          {/* Content scheduling */}
+          {isEditing && (
+            <ContentSchedule
+              contentId={id}
+              status={content.status}
+              onScheduleUpdate={handleScheduleUpdate}
+            />
+          )}
         </div>
       </div>
-      
-      {showPreview && isEditing && (
-        <ContentPreview 
-          contentId={id} 
-          onClose={() => setShowPreview(false)} 
+
+      {/* Content preview modal */}
+      {showPreview && (
+        <ContentPreview
+          content={content}
+          onClose={() => setShowPreview(false)}
         />
       )}
-      
-      {showTemplates && !isEditing && (
-        <ContentTemplates 
-          onSelectTemplate={handleSelectTemplate} 
-          onClose={() => setShowTemplates(false)} 
+
+      {/* Templates selection modal */}
+      {showTemplates && (
+        <ContentTemplates
+          onSelect={handleSelectTemplate}
+          onClose={() => setShowTemplates(false)}
         />
       )}
     </div>

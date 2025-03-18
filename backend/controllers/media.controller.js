@@ -4,12 +4,19 @@ const {
   asyncHandler, 
   NotFoundError, 
   AuthorizationError, 
-  ValidationError 
+  ValidationError,
+  AppError
 } = require('../utils/errorHandler');
 const fs = require('fs').promises;
 const path = require('path');
 const sharp = require('sharp');
 const { uploadToS3, deleteFromS3 } = require('../services/storage.service');
+const OpenAI = require('openai');
+
+// Initialize OpenAI API
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 /**
  * Get all media
@@ -155,7 +162,108 @@ exports.getPublicMediaById = async (req, res) => {
 };
 
 /**
- * Upload a single media file
+ * Generate tags for image using AI
+ * @param {string} imagePath - Path to the image file
+ * @returns {Promise<string[]>} - Array of generated tags
+ */
+const generateImageTags = async (imagePath, originalFilename) => {
+  try {
+    // Read the image file
+    const imageBuffer = await fs.readFile(imagePath);
+    
+    // Convert the buffer to base64
+    const base64Image = imageBuffer.toString('base64');
+    
+    // Create a data URL
+    const dataUrl = `data:image/jpeg;base64,${base64Image}`;
+    
+    // Call OpenAI API to analyze the image
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "system",
+          content: "You are an image tagging specialist who identifies relevant tags and keywords for images."
+        },
+        {
+          role: "user",
+          content: [
+            { 
+              type: "text", 
+              text: `Generate 8-10 relevant tags for this image. Use the filename "${originalFilename}" for additional context. Format your response as a JSON object with a single property "tags" that is an array of strings, each being a single tag.` 
+            },
+            { 
+              type: "image_url", 
+              image_url: { url: dataUrl } 
+            }
+          ]
+        }
+      ],
+      max_tokens: 300,
+      temperature: 0.5,
+      response_format: { type: "json_object" }
+    });
+    
+    // Parse the response
+    const tagsObj = JSON.parse(completion.choices[0].message.content);
+    return tagsObj.tags || [];
+  } catch (error) {
+    console.error('Error generating image tags:', error);
+    return [];
+  }
+};
+
+/**
+ * Generate image description using AI
+ * @param {string} imagePath - Path to the image file
+ * @returns {Promise<string>} - Generated description
+ */
+const generateImageDescription = async (imagePath, originalFilename) => {
+  try {
+    // Read the image file
+    const imageBuffer = await fs.readFile(imagePath);
+    
+    // Convert the buffer to base64
+    const base64Image = imageBuffer.toString('base64');
+    
+    // Create a data URL
+    const dataUrl = `data:image/jpeg;base64,${base64Image}`;
+    
+    // Call OpenAI API to analyze the image
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "system",
+          content: "You are an image description specialist who creates concise, descriptive alt text for images."
+        },
+        {
+          role: "user",
+          content: [
+            { 
+              type: "text", 
+              text: `Generate a concise alt text description for this image in 1-2 sentences. Use the filename "${originalFilename}" for additional context.` 
+            },
+            { 
+              type: "image_url", 
+              image_url: { url: dataUrl } 
+            }
+          ]
+        }
+      ],
+      max_tokens: 150,
+      temperature: 0.5
+    });
+    
+    return completion.choices[0].message.content.trim();
+  } catch (error) {
+    console.error('Error generating image description:', error);
+    return '';
+  }
+};
+
+/**
+ * Upload a single media file with AI tagging
  * @route POST /api/media/upload
  * @access Private
  */
@@ -174,6 +282,8 @@ exports.uploadMedia = asyncHandler(async (req, res) => {
   }
   
   let dimensions = null;
+  let aiTags = [];
+  let aiDescription = '';
   
   // If image, get dimensions using sharp
   if (mimetype.startsWith('image/')) {
@@ -183,8 +293,18 @@ exports.uploadMedia = asyncHandler(async (req, res) => {
         width: metadata.width,
         height: metadata.height
       };
+      
+      // Generate AI tags for images
+      if (req.body.autoTag !== 'false') {
+        aiTags = await generateImageTags(tempPath, originalname);
+      }
+      
+      // Generate AI description for alt text if not provided
+      if (!req.body.alt && req.body.autoDescription !== 'false') {
+        aiDescription = await generateImageDescription(tempPath, originalname);
+      }
     } catch (err) {
-      console.error('Error getting image dimensions:', err);
+      console.error('Error processing image:', err);
     }
   }
 
@@ -208,6 +328,17 @@ exports.uploadMedia = asyncHandler(async (req, res) => {
     throw new AppError('Error uploading file to storage', 500);
   }
   
+  // Parse user-provided tags and combine with AI tags
+  let userTags = [];
+  try {
+    userTags = req.body.tags ? JSON.parse(req.body.tags) : [];
+  } catch (err) {
+    userTags = req.body.tags ? req.body.tags.split(',').map(tag => tag.trim()) : [];
+  }
+  
+  // Combine user tags and AI tags, removing duplicates
+  const combinedTags = [...new Set([...userTags, ...aiTags])];
+  
   // Create media record
   const mediaData = {
     filename,
@@ -220,9 +351,13 @@ exports.uploadMedia = asyncHandler(async (req, res) => {
     folder,
     title: req.body.title || originalname.replace(/\.[^/.]+$/, ""),
     description: req.body.description || '',
-    alt: req.body.alt || '',
-    tags: req.body.tags ? JSON.parse(req.body.tags) : [],
-    isPublic: req.body.isPublic === 'true'
+    alt: req.body.alt || aiDescription,
+    tags: combinedTags,
+    isPublic: req.body.isPublic === 'true',
+    aiGenerated: {
+      tags: aiTags,
+      description: aiDescription
+    }
   };
   
   // Add dimensions if available

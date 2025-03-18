@@ -8,6 +8,12 @@ const {
   AuthorizationError, 
   ValidationError 
 } = require('../utils/errorHandler');
+const OpenAI = require('openai');
+
+// Initialize OpenAI API
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 /**
  * Get all content items
@@ -1417,5 +1423,234 @@ exports.unscheduleContent = asyncHandler(async (req, res) => {
   
   res.json({
     message: 'Schedule removed successfully'
+  });
+});
+
+/**
+ * Perform semantic search on content using AI
+ * @route POST /api/content/semantic-search
+ * @access Private
+ */
+exports.semanticSearch = asyncHandler(async (req, res) => {
+  const { query, limit = 10 } = req.body;
+  
+  if (!query) {
+    throw new ValidationError('Search query is required');
+  }
+  
+  try {
+    // Get vector embeddings for the search query
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: query,
+      encoding_format: "float"
+    });
+    
+    const queryEmbedding = embeddingResponse.data[0].embedding;
+    
+    // Get all content (we'll filter in memory since we need to compute similarity)
+    // In a production environment, you'd want to use a vector database for this
+    const allContent = await Content.find({
+      isTemplate: { $ne: true },
+      status: req.user ? undefined : 'published' // Only show published content for non-authenticated users
+    })
+    .populate('author', 'firstName lastName')
+    .populate('categories', 'name')
+    .select('title content excerpt slug status categories tags createdAt updatedAt author');
+    
+    // For each content item, compute semantic similarity score if it has an embedding
+    // If not, we'll use text matching as a fallback
+    const contentWithScores = await Promise.all(allContent.map(async (content) => {
+      // If the content doesn't have a precomputed embedding, generate one
+      let contentEmbedding;
+      if (!content.embedding) {
+        // Create a text representation of the content
+        const textToEmbed = `${content.title} ${content.excerpt || ''} ${content.content.substring(0, 1000)}`;
+        
+        try {
+          const embeddingResponse = await openai.embeddings.create({
+            model: "text-embedding-3-small",
+            input: textToEmbed,
+            encoding_format: "float"
+          });
+          
+          contentEmbedding = embeddingResponse.data[0].embedding;
+          
+          // Store the embedding for future searches
+          await Content.findByIdAndUpdate(content._id, { 
+            embedding: contentEmbedding,
+            embeddingUpdatedAt: new Date()
+          });
+        } catch (error) {
+          console.error('Error generating embedding:', error);
+          contentEmbedding = null;
+        }
+      } else {
+        contentEmbedding = content.embedding;
+      }
+      
+      // Calculate semantic similarity using cosine similarity
+      let similarityScore = 0;
+      
+      if (contentEmbedding) {
+        // Calculate cosine similarity
+        const dotProduct = queryEmbedding.reduce((sum, val, i) => sum + val * contentEmbedding[i], 0);
+        const queryMagnitude = Math.sqrt(queryEmbedding.reduce((sum, val) => sum + val * val, 0));
+        const contentMagnitude = Math.sqrt(contentEmbedding.reduce((sum, val) => sum + val * val, 0));
+        
+        similarityScore = dotProduct / (queryMagnitude * contentMagnitude);
+      } else {
+        // Fallback: Simple text matching (less effective)
+        const matchText = `${content.title} ${content.excerpt || ''} ${content.content}`.toLowerCase();
+        const queryTerms = query.toLowerCase().split(' ');
+        const matchCount = queryTerms.filter(term => matchText.includes(term)).length;
+        similarityScore = matchCount / queryTerms.length;
+      }
+      
+      return {
+        content,
+        score: similarityScore
+      };
+    }));
+    
+    // Sort by similarity score (highest first)
+    contentWithScores.sort((a, b) => b.score - a.score);
+    
+    // Get the top results
+    const topResults = contentWithScores
+      .slice(0, limit)
+      .filter(item => item.score > 0.1) // Only include reasonably relevant results
+      .map(item => ({
+        ...item.content.toObject(),
+        relevanceScore: Math.round(item.score * 100) / 100
+      }));
+    
+    res.json({
+      results: topResults,
+      count: topResults.length,
+      query
+    });
+  } catch (error) {
+    console.error('Semantic search error:', error);
+    throw new AppError('Error performing semantic search', 500);
+  }
+});
+
+/**
+ * Generate content suggestions based on existing content using AI
+ * @route POST /api/content/suggest-related
+ * @access Private
+ */
+exports.suggestRelatedContent = asyncHandler(async (req, res) => {
+  const { contentId, count = 5 } = req.body;
+  
+  if (!contentId) {
+    throw new ValidationError('Content ID is required');
+  }
+  
+  // Get the source content
+  const sourceContent = await Content.findById(contentId)
+    .select('title content excerpt categories tags');
+  
+  if (!sourceContent) {
+    throw new NotFoundError('Content');
+  }
+  
+  // Create a text representation of the source content
+  const sourceText = `${sourceContent.title} ${sourceContent.excerpt || ''} ${sourceContent.content.substring(0, 1000)}`;
+  
+  // Get vector embedding for the source content
+  const embeddingResponse = await openai.embeddings.create({
+    model: "text-embedding-3-small",
+    input: sourceText,
+    encoding_format: "float"
+  });
+  
+  const sourceEmbedding = embeddingResponse.data[0].embedding;
+  
+  // Get all other content
+  const allOtherContent = await Content.find({
+    _id: { $ne: contentId },
+    isTemplate: { $ne: true },
+    status: 'published'
+  })
+  .populate('author', 'firstName lastName')
+  .populate('categories', 'name')
+  .select('title content excerpt slug status categories tags createdAt updatedAt author embedding');
+  
+  // Compute similarity scores
+  const contentWithScores = await Promise.all(allOtherContent.map(async (content) => {
+    let contentEmbedding = content.embedding;
+    
+    // If the content doesn't have a precomputed embedding, generate one
+    if (!contentEmbedding) {
+      const textToEmbed = `${content.title} ${content.excerpt || ''} ${content.content.substring(0, 1000)}`;
+      
+      try {
+        const embeddingResponse = await openai.embeddings.create({
+          model: "text-embedding-3-small",
+          input: textToEmbed,
+          encoding_format: "float"
+        });
+        
+        contentEmbedding = embeddingResponse.data[0].embedding;
+        
+        // Store the embedding for future searches
+        await Content.findByIdAndUpdate(content._id, { 
+          embedding: contentEmbedding,
+          embeddingUpdatedAt: new Date()
+        });
+      } catch (error) {
+        console.error('Error generating embedding:', error);
+        contentEmbedding = null;
+      }
+    }
+    
+    // Calculate semantic similarity using cosine similarity
+    let similarityScore = 0;
+    
+    if (contentEmbedding) {
+      // Calculate cosine similarity
+      const dotProduct = sourceEmbedding.reduce((sum, val, i) => sum + val * contentEmbedding[i], 0);
+      const sourceMagnitude = Math.sqrt(sourceEmbedding.reduce((sum, val) => sum + val * val, 0));
+      const contentMagnitude = Math.sqrt(contentEmbedding.reduce((sum, val) => sum + val * val, 0));
+      
+      similarityScore = dotProduct / (sourceMagnitude * contentMagnitude);
+    } else {
+      // Fallback: Category and tag matching
+      const sourceCategories = sourceContent.categories.map(c => c.toString());
+      const contentCategories = content.categories.map(c => c.toString());
+      const categoryOverlap = sourceCategories.filter(c => contentCategories.includes(c)).length;
+      
+      const tagOverlap = sourceContent.tags.filter(t => content.tags.includes(t)).length;
+      
+      similarityScore = (categoryOverlap * 0.6 + tagOverlap * 0.4) / 
+        Math.max(1, Math.max(sourceCategories.length, contentCategories.length));
+    }
+    
+    return {
+      content,
+      score: similarityScore
+    };
+  }));
+  
+  // Sort by similarity score (highest first) and get top results
+  contentWithScores.sort((a, b) => b.score - a.score);
+  
+  const relatedContent = contentWithScores
+    .slice(0, count)
+    .filter(item => item.score > 0.2) // Only include reasonably related content
+    .map(item => ({
+      ...item.content.toObject(),
+      relevanceScore: Math.round(item.score * 100) / 100
+    }));
+  
+  res.json({
+    relatedContent,
+    count: relatedContent.length,
+    sourceContent: {
+      id: sourceContent._id,
+      title: sourceContent.title
+    }
   });
 }); 

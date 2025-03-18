@@ -55,13 +55,23 @@ const mediaSchema = new mongoose.Schema({
     type: String,
     trim: true
   }],
-  aiTags: [{
-    type: String,
-    trim: true
-  }],
-  aiDescription: {
-    type: String,
-    default: ''
+  aiGenerated: {
+    tags: [{
+      type: String,
+      trim: true
+    }],
+    description: {
+      type: String,
+      default: ''
+    },
+    analysis: {
+      type: Object,
+      default: {}
+    },
+    generatedAt: {
+      type: Date,
+      default: Date.now
+    }
   },
   dimensions: {
     width: Number,
@@ -128,7 +138,8 @@ mediaSchema.index({
   title: 'text', 
   description: 'text', 
   tags: 'text',
-  aiTags: 'text',
+  'aiGenerated.tags': 'text',
+  'aiGenerated.description': 'text',
   folder: 'text'
 });
 

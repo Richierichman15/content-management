@@ -15,6 +15,7 @@ router.get('/published/:slug', contentController.getContent);
 router.get('/categories', contentController.getCategories);
 router.get('/categories/:slug', contentController.getCategoryBySlug);
 router.get('/search', contentController.searchContent);
+router.post('/semantic-search', contentController.semanticSearch);
 
 // Content CRUD operations - protected routes
 router.get('/', contentController.getAllContent);
@@ -30,6 +31,7 @@ router.get('/:id/suggestions', protect, contentController.getContentSuggestions)
 router.post('/:id/suggestions/:suggestionId/apply', protect, contentController.applySuggestion);
 router.get('/:id/revisions', protect, contentController.getContentRevisions);
 router.post('/:id/revisions/:revisionId/restore', protect, contentController.restoreRevision);
+router.post('/suggest-related', contentController.suggestRelatedContent);
 
 // Category operations - restricted to admins and editors
 router.use('/categories', protect);

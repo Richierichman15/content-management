@@ -70,6 +70,15 @@ const contentSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  embedding: {
+    type: [Number],
+    select: false, // Don't include this field in regular queries
+    sparse: true
+  },
+  embeddingUpdatedAt: {
+    type: Date,
+    default: null
+  },
   readabilityScore: {
     type: Number,
     min: 0,
