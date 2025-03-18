@@ -1,5 +1,11 @@
 const Media = require('../models/media.model');
-const { errorHandler } = require('../utils/errorHandler');
+const { 
+  errorHandler, 
+  asyncHandler, 
+  NotFoundError, 
+  AuthorizationError, 
+  ValidationError 
+} = require('../utils/errorHandler');
 const fs = require('fs').promises;
 const path = require('path');
 const sharp = require('sharp');
@@ -10,46 +16,42 @@ const { uploadToS3, deleteFromS3 } = require('../services/storage.service');
  * @route GET /api/media
  * @access Private
  */
-exports.getAllMedia = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
-    
-    const sort = req.query.sort || '-createdAt';
-    const query = { uploadedBy: req.user.id };
-    
-    // Apply folder filter if provided
-    if (req.query.folder) {
-      query.folder = req.query.folder;
-    }
-    
-    // Apply file type filter if provided
-    if (req.query.fileType) {
-      query.mimeType = new RegExp(`^${req.query.fileType}/`);
-    }
-    
-    const total = await Media.countDocuments(query);
-    
-    const media = await Media.find(query)
-      .sort(sort)
-      .skip(skip)
-      .limit(limit)
-      .populate('uploadedBy', 'name email');
-    
-    res.json({
-      media,
-      pagination: {
-        total,
-        page,
-        limit,
-        pages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    errorHandler(res, error);
+exports.getAllMedia = asyncHandler(async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 20;
+  const skip = (page - 1) * limit;
+  
+  const sort = req.query.sort || '-createdAt';
+  const query = { uploadedBy: req.user.id };
+  
+  // Apply folder filter if provided
+  if (req.query.folder) {
+    query.folder = req.query.folder;
   }
-};
+  
+  // Apply file type filter if provided
+  if (req.query.fileType) {
+    query.mimeType = new RegExp(`^${req.query.fileType}/`);
+  }
+  
+  const total = await Media.countDocuments(query);
+  
+  const media = await Media.find(query)
+    .sort(sort)
+    .skip(skip)
+    .limit(limit)
+    .populate('uploadedBy', 'name email');
+  
+  res.json({
+    media,
+    pagination: {
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit)
+    }
+  });
+});
 
 /**
  * Get public media
@@ -157,79 +159,81 @@ exports.getPublicMediaById = async (req, res) => {
  * @route POST /api/media/upload
  * @access Private
  */
-exports.uploadMedia = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'No file uploaded' });
-    }
-    
-    // Get file details from multer
-    const { originalname, mimetype, path: tempPath, filename, size } = req.file;
-    
-    let dimensions = null;
-    
-    // If image, get dimensions using sharp
-    if (mimetype.startsWith('image/')) {
-      try {
-        const metadata = await sharp(tempPath).metadata();
-        dimensions = {
-          width: metadata.width,
-          height: metadata.height
-        };
-      } catch (err) {
-        console.error('Error getting image dimensions:', err);
-      }
-    }
-
-    // Extract folder from request if provided
-    const folder = req.body.folder || '';
-    
-    // Upload to storage service (S3 or local)
-    let uploadPath, url;
-    try {
-      // Check if uploadToS3 function exists (for cloud storage)
-      if (typeof uploadToS3 === 'function') {
-        const result = await uploadToS3(tempPath, filename, mimetype);
-        uploadPath = result.key;
-        url = result.url;
-      } else {
-        // If no cloud storage, use local path
-        uploadPath = tempPath;
-        url = `/uploads/${filename}`;
-      }
-    } catch (error) {
-      return res.status(500).json({ message: 'Error uploading file to storage', error });
-    }
-    
-    // Create media record
-    const mediaData = {
-      filename,
-      originalFilename: originalname,
-      path: uploadPath,
-      url,
-      mimeType: mimetype,
-      size,
-      uploadedBy: req.user.id,
-      folder,
-      title: req.body.title || originalname.replace(/\.[^/.]+$/, ""),
-      description: req.body.description || '',
-      alt: req.body.alt || '',
-      tags: req.body.tags ? JSON.parse(req.body.tags) : [],
-      isPublic: req.body.isPublic === 'true'
-    };
-    
-    // Add dimensions if available
-    if (dimensions) {
-      mediaData.dimensions = dimensions;
-    }
-    
-    const media = await Media.create(mediaData);
-    
-    res.status(201).json(media);
-  } catch (error) {
-    errorHandler(res, error);
+exports.uploadMedia = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new ValidationError('No file uploaded', { file: 'A file must be provided' });
   }
-};
+  
+  // Get file details from multer
+  const { originalname, mimetype, path: tempPath, filename, size } = req.file;
+  
+  // Validate file size (10MB limit)
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  if (size > MAX_FILE_SIZE) {
+    throw new ValidationError('File too large', { file: 'File size must be less than 10MB' });
+  }
+  
+  let dimensions = null;
+  
+  // If image, get dimensions using sharp
+  if (mimetype.startsWith('image/')) {
+    try {
+      const metadata = await sharp(tempPath).metadata();
+      dimensions = {
+        width: metadata.width,
+        height: metadata.height
+      };
+    } catch (err) {
+      console.error('Error getting image dimensions:', err);
+    }
+  }
+
+  // Extract folder from request if provided
+  const folder = req.body.folder || '';
+  
+  // Upload to storage service (S3 or local)
+  let uploadPath, url;
+  try {
+    // Check if uploadToS3 function exists (for cloud storage)
+    if (typeof uploadToS3 === 'function') {
+      const result = await uploadToS3(tempPath, filename, mimetype);
+      uploadPath = result.key;
+      url = result.url;
+    } else {
+      // If no cloud storage, use local path
+      uploadPath = tempPath;
+      url = `/uploads/${filename}`;
+    }
+  } catch (error) {
+    throw new AppError('Error uploading file to storage', 500);
+  }
+  
+  // Create media record
+  const mediaData = {
+    filename,
+    originalFilename: originalname,
+    path: uploadPath,
+    url,
+    mimeType: mimetype,
+    size,
+    uploadedBy: req.user.id,
+    folder,
+    title: req.body.title || originalname.replace(/\.[^/.]+$/, ""),
+    description: req.body.description || '',
+    alt: req.body.alt || '',
+    tags: req.body.tags ? JSON.parse(req.body.tags) : [],
+    isPublic: req.body.isPublic === 'true'
+  };
+  
+  // Add dimensions if available
+  if (dimensions) {
+    mediaData.dimensions = dimensions;
+  }
+  
+  const media = await Media.create(mediaData);
+  
+  res.status(201).json(media);
+});
 
 /**
  * Upload multiple media files
@@ -604,42 +608,74 @@ exports.updateVisibility = async (req, res) => {
  * @route POST /api/media/:id/analyze
  * @access Private
  */
-exports.analyzeMedia = async (req, res) => {
+exports.analyzeMedia = asyncHandler(async (req, res) => {
+  const media = await Media.findById(req.params.id);
+  
+  if (!media) {
+    throw new NotFoundError('Media');
+  }
+  
+  // Check ownership
+  if (media.uploadedBy.toString() !== req.user.id) {
+    throw new AuthorizationError('Not authorized to analyze this media');
+  }
+  
+  // Only analyze images for now
+  if (!media.mimeType.startsWith('image/')) {
+    throw new ValidationError('Only images can be analyzed', { mimeType: 'Must be an image file' });
+  }
+
+  // Get OpenAI service
+  const openaiService = require('../services/openai.service');
+  
   try {
-    const media = await Media.findById(req.params.id);
+    // Analyze image
+    const analysisResult = await openaiService.analyzeImage(media.url);
     
-    if (!media) {
-      return res.status(404).json({ message: 'Media not found' });
+    if (!analysisResult) {
+      throw new AppError('AI analysis failed', 500);
     }
-    
-    // Check ownership
-    if (media.uploadedBy.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Not authorized to analyze this media' });
-    }
-    
-    // Only analyze images for now
-    if (!media.mimeType.startsWith('image/')) {
-      return res.status(400).json({ message: 'Only images can be analyzed' });
-    }
-    
-    // TODO: Implement actual AI analysis using an AI service 
-    // For now, we'll just simulate it
-    const simulatedAITags = ['simulated', 'ai', 'tags'];
-    const simulatedAIDescription = 'This is a simulated AI description of the image.';
     
     // Update the media with AI-generated content
+    media.aiTags = analysisResult.tags || [];
+    media.aiDescription = analysisResult.description || '';
+    
+    // Add accessibility text if not already set
+    if (!media.accessibilityText || media.accessibilityText.trim() === '') {
+      media.accessibilityText = analysisResult.accessibilityText || '';
+    }
+    
+    await media.save();
+    
+    res.json({
+      success: true,
+      media,
+      analysis: {
+        tags: media.aiTags,
+        description: media.aiDescription,
+        accessibilityText: analysisResult.accessibilityText
+      }
+    });
+  } catch (aiError) {
+    console.error('AI analysis error:', aiError);
+    
+    // Fallback to simulated AI if real AI fails
+    const simulatedAITags = ['image', 'content', 'media'];
+    const simulatedAIDescription = 'This is an image in the media library.';
+    
+    // Update the media with simulated content
     media.aiTags = simulatedAITags;
     media.aiDescription = simulatedAIDescription;
     await media.save();
     
     res.json({
       success: true,
-      media
+      media,
+      fallback: true,
+      message: 'Used fallback analysis due to AI service error'
     });
-  } catch (error) {
-    errorHandler(res, error);
   }
-};
+});
 
 /**
  * Create image variant (resize, crop, etc.)

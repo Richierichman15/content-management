@@ -1,87 +1,152 @@
 const fs = require('fs').promises;
 const path = require('path');
 const AWS = require('aws-sdk');
+const config = require('../config/config');
 const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
 
-// Check if AWS credentials are configured
-const isS3Configured = process.env.AWS_S3_BUCKET && 
-                       process.env.AWS_ACCESS_KEY_ID && 
-                       process.env.AWS_SECRET_ACCESS_KEY;
-
-// Configure AWS SDK if credentials are available
-let s3;
-if (isS3Configured) {
-  AWS.config.update({
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    region: process.env.AWS_REGION || 'us-east-1'
-  });
+/**
+ * Storage service for handling media file uploads
+ */
+class StorageService {
+  constructor() {
+    this.storageType = config.storage.type;
+    
+    // Initialize S3 if needed
+    if (this.storageType === 's3') {
+      this.s3 = new AWS.S3({
+        accessKeyId: config.storage.s3.accessKeyId,
+        secretAccessKey: config.storage.s3.secretAccessKey,
+        region: config.storage.s3.region
+      });
+      this.bucket = config.storage.s3.bucket;
+    }
+    
+    // Create upload directory if it doesn't exist
+    this.uploadDir = path.join(process.cwd(), config.storage.local.uploadDir);
+    this.createUploadDirIfNotExists();
+  }
   
-  s3 = new AWS.S3();
+  /**
+   * Create upload directory if it doesn't exist
+   */
+  async createUploadDirIfNotExists() {
+    try {
+      await fs.access(this.uploadDir);
+    } catch (error) {
+      console.log(`Creating upload directory: ${this.uploadDir}`);
+      await fs.mkdir(this.uploadDir, { recursive: true });
+    }
+  }
+  
+  /**
+   * Upload file to storage (local or S3)
+   * @param {string} filePath - Path to the temporary file
+   * @param {string} fileName - Name of the file
+   * @param {string} mimeType - MIME type of the file
+   * @returns {Promise<Object>} Upload result with key and url
+   */
+  async uploadToS3(filePath, fileName, mimeType) {
+    // Check if we're using S3
+    if (this.storageType !== 's3') {
+      // For local storage, just return the file info
+      return {
+        key: filePath,
+        url: `/${config.storage.local.uploadDir}/${fileName}`
+      };
+    }
+    
+    // Generate a unique file key using UUID
+    const fileExt = path.extname(fileName);
+    const fileKey = `uploads/${uuidv4()}${fileExt}`;
+    
+    // Read file
+    const fileContent = await fs.readFile(filePath);
+    
+    // Upload to S3
+    const params = {
+      Bucket: this.bucket,
+      Key: fileKey,
+      Body: fileContent,
+      ContentType: mimeType,
+      ACL: 'public-read'
+    };
+    
+    const result = await this.s3.upload(params).promise();
+    
+    // Delete local temp file
+    await fs.unlink(filePath);
+    
+    return {
+      key: fileKey,
+      url: result.Location
+    };
+  }
+  
+  /**
+   * Delete file from storage (local or S3)
+   * @param {string} fileKey - Key or path of the file
+   * @returns {Promise<boolean>} Success status
+   */
+  async deleteFromS3(fileKey) {
+    // Check if we're using S3
+    if (this.storageType !== 's3') {
+      // For local storage, delete the local file
+      try {
+        await fs.unlink(fileKey);
+        return true;
+      } catch (error) {
+        console.error(`Error deleting local file: ${fileKey}`, error);
+        return false;
+      }
+    }
+    
+    // Delete from S3
+    const params = {
+      Bucket: this.bucket,
+      Key: fileKey
+    };
+    
+    try {
+      await this.s3.deleteObject(params).promise();
+      return true;
+    } catch (error) {
+      console.error(`Error deleting file from S3: ${fileKey}`, error);
+      return false;
+    }
+  }
+  
+  /**
+   * Get signed URL for a file (for private files)
+   * @param {string} fileKey - Key of the file in storage
+   * @param {number} expiry - Expiry time in seconds
+   * @returns {Promise<string>} Signed URL
+   */
+  async getSignedUrl(fileKey, expiry = 3600) {
+    if (this.storageType !== 's3') {
+      // For local storage, just return the file path
+      return `${config.storage.local.baseUrl}/${config.storage.local.uploadDir}/${path.basename(fileKey)}`;
+    }
+    
+    // Generate signed URL for S3
+    const params = {
+      Bucket: this.bucket,
+      Key: fileKey,
+      Expires: expiry
+    };
+    
+    return this.s3.getSignedUrlPromise('getObject', params);
+  }
 }
 
-/**
- * Upload a file to S3
- * @param {string} filePath - Local path to the file
- * @param {string} filename - Original filename
- * @param {string} mimeType - File MIME type
- * @returns {Promise<{key: string, url: string}>} - The S3 object key and URL
- */
-exports.uploadToS3 = async (filePath, filename, mimeType) => {
-  if (!isS3Configured) {
-    throw new Error('AWS S3 is not configured');
-  }
-  
-  // Read file from disk
-  const fileContent = await fs.readFile(filePath);
-  
-  // Generate unique object key
-  const key = `uploads/${uuidv4()}-${filename}`;
-  
-  // Set parameters for S3 upload
-  const params = {
-    Bucket: process.env.AWS_S3_BUCKET,
-    Key: key,
-    Body: fileContent,
-    ContentType: mimeType,
-    ACL: 'public-read' // Make file publicly accessible
-  };
-  
-  // Upload to S3
-  const result = await s3.upload(params).promise();
-  
-  // Return S3 key and public URL
-  return {
-    key,
-    url: result.Location
-  };
-};
+// Create singleton instance
+const storageService = new StorageService();
 
-/**
- * Delete a file from S3
- * @param {string} key - S3 object key or full URL
- * @returns {Promise<void>}
- */
-exports.deleteFromS3 = async (key) => {
-  if (!isS3Configured) {
-    throw new Error('AWS S3 is not configured');
-  }
-  
-  // If a full URL was provided, extract the key
-  if (key.startsWith('http')) {
-    const url = new URL(key);
-    key = url.pathname.slice(1); // Remove leading slash
-  }
-  
-  // Set parameters for S3 delete
-  const params = {
-    Bucket: process.env.AWS_S3_BUCKET,
-    Key: key
-  };
-  
-  // Delete from S3
-  await s3.deleteObject(params).promise();
+// Export the service methods
+module.exports = {
+  uploadToS3: storageService.uploadToS3.bind(storageService),
+  deleteFromS3: storageService.deleteFromS3.bind(storageService),
+  getSignedUrl: storageService.getSignedUrl.bind(storageService)
 };
 
 /**

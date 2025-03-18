@@ -1,257 +1,330 @@
 const Content = require('../models/content.model');
 const Category = require('../models/category.model');
 const mongoose = require('mongoose');
+const { 
+  errorHandler, 
+  asyncHandler, 
+  NotFoundError, 
+  AuthorizationError, 
+  ValidationError 
+} = require('../utils/errorHandler');
 
 /**
  * Get all content items
+ * @route GET /api/content
+ * @access Private
  */
-exports.getAllContent = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-    
-    // Filter options
-    const filter = {};
-    
-    // By default, exclude templates unless specifically requested
-    if (!req.query.includeTemplates) {
-      filter.isTemplate = { $ne: true };
-    }
-    
-    // Status filter
-    if (req.query.status) {
-      filter.status = req.query.status;
-    }
-    
-    // Category filter
-    if (req.query.category) {
-      filter.categories = req.query.category;
-    }
-    
-    // Author filter (if not admin, only show own content)
-    if (req.user.role !== 'admin' && !req.query.all) {
-      filter.author = req.user.id;
-    } else if (req.query.author) {
-      filter.author = req.query.author;
-    }
-    
-    // Tags filter
-    if (req.query.tag) {
-      filter.tags = req.query.tag;
-    }
-    
-    // Get total count for pagination
-    const total = await Content.countDocuments(filter);
-    
-    // Find content with pagination
-    let query = Content.find(filter)
-                       .sort({ createdAt: -1 })
-                       .skip(skip)
-                       .limit(limit)
-                       .populate('author', 'firstName lastName')
-                       .populate('categories', 'name');
-    
-    if (req.query.fields) {
-      const fields = req.query.fields.split(',').join(' ');
-      query = query.select(fields);
-    }
-    
-    const content = await query;
-    
-    res.status(200).json({
-      status: 'success',
-      results: content.length,
-      pagination: {
-        total,
-        page,
-        pages: Math.ceil(total / limit),
-        limit
-      },
-      data: {
-        content
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: error.message
-    });
+exports.getAllContent = asyncHandler(async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
+  
+  // Filter options
+  const filter = {};
+  
+  // By default, exclude templates unless specifically requested
+  if (!req.query.includeTemplates) {
+    filter.isTemplate = { $ne: true };
   }
-};
+  
+  // Status filter
+  if (req.query.status) {
+    filter.status = req.query.status;
+  }
+  
+  // Category filter
+  if (req.query.category) {
+    filter.categories = req.query.category;
+  }
+  
+  // Author filter (if not admin, only show own content)
+  if (req.user.role !== 'admin' && !req.query.all) {
+    filter.author = req.user.id;
+  } else if (req.query.author) {
+    filter.author = req.query.author;
+  }
+  
+  // Tags filter
+  if (req.query.tag) {
+    filter.tags = req.query.tag;
+  }
+  
+  // Get total count for pagination
+  const total = await Content.countDocuments(filter);
+  
+  // Find content with pagination
+  let query = Content.find(filter)
+                     .sort({ createdAt: -1 })
+                     .skip(skip)
+                     .limit(limit)
+                     .populate('author', 'firstName lastName')
+                     .populate('categories', 'name');
+  
+  if (req.query.fields) {
+    const fields = req.query.fields.split(',').join(' ');
+    query = query.select(fields);
+  }
+  
+  const content = await query;
+  
+  res.status(200).json({
+    status: 'success',
+    results: content.length,
+    pagination: {
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      limit
+    },
+    data: {
+      content
+    }
+  });
+});
 
 /**
  * Get content by ID
+ * @route GET /api/content/:id
+ * @access Private
  */
-exports.getContentById = async (req, res) => {
-  try {
-    const content = await Content.findById(req.params.id)
-                                  .populate('author', 'firstName lastName')
-                                  .populate('categories', 'name');
-    
-    if (!content) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Content not found'
-      });
-    }
-    
-    // Check permissions
-    if (content.author._id.toString() !== req.user.id && 
-        req.user.role !== 'admin' && 
-        req.user.role !== 'editor') {
-      return res.status(403).json({
-        status: 'fail',
-        message: 'You do not have permission to view this content'
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        content
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: error.message
-    });
+exports.getContentById = asyncHandler(async (req, res) => {
+  const content = await Content.findById(req.params.id)
+                                .populate('author', 'firstName lastName')
+                                .populate('categories', 'name');
+  
+  if (!content) {
+    throw new NotFoundError('Content');
   }
-};
+  
+  // Check permissions
+  if (content.author._id.toString() !== req.user.id && 
+      req.user.role !== 'admin' && 
+      req.user.role !== 'editor') {
+    throw new AuthorizationError('You do not have permission to view this content');
+  }
+  
+  res.status(200).json({
+    status: 'success',
+    data: {
+      content
+    }
+  });
+});
 
 /**
  * Create new content
+ * @route POST /api/content
+ * @access Private
  */
-exports.createContent = async (req, res) => {
-  try {
-    // Set author to current user
-    req.body.author = req.user.id;
-    
-    // Handle categories
-    if (req.body.categories) {
-      // Check if categories exist
-      const categoryIds = Array.isArray(req.body.categories) 
-        ? req.body.categories 
-        : req.body.categories.split(',').map(id => id.trim());
-      
-      const validCategories = await Category.countDocuments({
-        _id: { $in: categoryIds }
-      });
-      
-      if (validCategories !== categoryIds.length) {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'One or more categories do not exist'
-        });
-      }
-      
-      req.body.categories = categoryIds;
-    }
-    
-    const content = await Content.create(req.body);
-    
-    res.status(201).json({
-      status: 'success',
-      data: {
-        content
-      }
-    });
-  } catch (error) {
-    res.status(400).json({
-      status: 'error',
-      message: error.message
-    });
+exports.createContent = asyncHandler(async (req, res) => {
+  const {
+    title,
+    content,
+    excerpt,
+    slug,
+    status = 'draft',
+    categories = [],
+    tags = [],
+    isTemplate = false,
+    templateId,
+    publishDate,
+    unpublishDate,
+    seoData = {},
+    featured = false
+  } = req.body;
+
+  // Validate required fields
+  if (!title) {
+    throw new ValidationError('Title is required', { title: 'Title field cannot be empty' });
   }
-};
+
+  // Generate slug if not provided
+  let contentSlug = slug;
+  if (!contentSlug) {
+    contentSlug = title
+      .toLowerCase()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-');
+  }
+
+  // Check if slug is unique
+  const existingContent = await Content.findOne({ slug: contentSlug });
+  if (existingContent) {
+    contentSlug = `${contentSlug}-${Date.now().toString().slice(-4)}`;
+  }
+
+  // If using a template, get the template data
+  let templateData = {};
+  if (templateId) {
+    const template = await Content.findOne({ _id: templateId, isTemplate: true });
+    if (!template) {
+      throw new NotFoundError('Template');
+    }
+    templateData = {
+      content: template.content,
+      structure: template.structure,
+      templateMeta: {
+        originalTemplate: templateId,
+        appliedAt: new Date()
+      }
+    };
+  }
+
+  // Process featured image if uploaded
+  let featuredImage = null;
+  if (req.file) {
+    featuredImage = {
+      url: req.file.path,
+      alt: req.body.featuredImageAlt || title,
+      caption: req.body.featuredImageCaption || ''
+    };
+  }
+
+  // Create new content
+  const newContent = new Content({
+    title,
+    content: content || templateData.content || '',
+    excerpt,
+    slug: contentSlug,
+    status,
+    author: req.user.id,
+    categories,
+    tags,
+    featuredImage,
+    isTemplate,
+    seo: seoData,
+    featured,
+    ...templateData
+  });
+
+  // Save to database
+  await newContent.save();
+
+  // If there's a publish date, schedule it
+  if (publishDate && status !== 'published') {
+    const schedulerService = require('../services/scheduler.service');
+    await schedulerService.scheduleContent(newContent._id, publishDate, 'publish');
+  }
+
+  // If there's an unpublish date, schedule it
+  if (unpublishDate && status === 'published') {
+    const schedulerService = require('../services/scheduler.service');
+    await schedulerService.scheduleContent(newContent._id, unpublishDate, 'unpublish');
+  }
+
+  // Create initial version for versioning
+  await this.createContentVersion(newContent._id, 'Initial creation', req.user.id);
+
+  res.status(201).json({
+    message: 'Content created successfully',
+    content: newContent
+  });
+});
 
 /**
  * Update content
+ * @route PUT /api/content/:id
+ * @access Private
  */
-exports.updateContent = async (req, res) => {
-  try {
-    const content = await Content.findById(req.params.id);
-    
-    if (!content) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Content not found'
-      });
-    }
-    
-    // Check permissions
-    if (content.author.toString() !== req.user.id && 
-        req.user.role !== 'admin' && 
-        req.user.role !== 'editor') {
-      return res.status(403).json({
-        status: 'fail',
-        message: 'You do not have permission to update this content'
-      });
-    }
-    
-    // Handle categories
-    if (req.body.categories) {
-      const categoryIds = Array.isArray(req.body.categories) 
-        ? req.body.categories 
-        : req.body.categories.split(',').map(id => id.trim());
-      
-      const validCategories = await Category.countDocuments({
-        _id: { $in: categoryIds }
-      });
-      
-      if (validCategories !== categoryIds.length) {
-        return res.status(400).json({
-          status: 'fail',
-          message: 'One or more categories do not exist'
-        });
-      }
-      
-      req.body.categories = categoryIds;
-    }
-    
-    // Save the previous version to revision history
-    const revisionEntry = {
-      editor: req.user.id,
-      changes: 'Content updated',
-      content: {
-        title: content.title,
-        content: content.content,
-        excerpt: content.excerpt,
-        status: content.status
-      }
-    };
-    
-    // Set last editor
-    req.body.lastEditor = req.user.id;
-    
-    // If status changes to published, set publishedAt
-    if (req.body.status === 'published' && content.status !== 'published') {
-      req.body.publishedAt = new Date();
-    }
-    
-    // Push to revision history
-    content.revisionHistory.push(revisionEntry);
-    
-    // Update the content
-    Object.keys(req.body).forEach(key => {
-      content[key] = req.body[key];
-    });
-    
-    await content.save();
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        content
-      }
-    });
-  } catch (error) {
-    res.status(400).json({
-      status: 'error',
-      message: error.message
-    });
+exports.updateContent = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const {
+    title,
+    content,
+    excerpt,
+    slug,
+    status,
+    categories,
+    tags,
+    seoData,
+    featured,
+    versionComment,
+    publishDate,
+    unpublishDate
+  } = req.body;
+
+  // Find content by ID
+  const existingContent = await Content.findById(id);
+
+  if (!existingContent) {
+    throw new NotFoundError('Content');
   }
-};
+
+  // Check if user is authorized to update this content
+  if (existingContent.author.toString() !== req.user.id && req.user.role !== 'admin') {
+    throw new AuthorizationError('Not authorized to update this content');
+  }
+
+  // If slug is being changed, check if the new slug is unique
+  if (slug && slug !== existingContent.slug) {
+    const slugExists = await Content.findOne({ slug, _id: { $ne: id } });
+    if (slugExists) {
+      throw new ValidationError('Slug already in use', { slug: 'This slug is already taken' });
+    }
+  }
+
+  // Process featured image if uploaded
+  let featuredImage = existingContent.featuredImage;
+  if (req.file) {
+    featuredImage = {
+      url: req.file.path,
+      alt: req.body.featuredImageAlt || title || existingContent.title,
+      caption: req.body.featuredImageCaption || ''
+    };
+  }
+
+  // Create a version before updating
+  await this.createContentVersion(
+    id, 
+    versionComment || `Updated by ${req.user.name || req.user.email}`, 
+    req.user.id
+  );
+
+  // Update the content
+  const updatedContent = await Content.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        title: title || existingContent.title,
+        content: content || existingContent.content,
+        excerpt: excerpt !== undefined ? excerpt : existingContent.excerpt,
+        slug: slug || existingContent.slug,
+        status: status || existingContent.status,
+        categories: categories || existingContent.categories,
+        tags: tags || existingContent.tags,
+        featuredImage,
+        seo: seoData || existingContent.seo,
+        featured: featured !== undefined ? featured : existingContent.featured,
+        updatedAt: Date.now()
+      }
+    },
+    { new: true, runValidators: true }
+  );
+
+  // Handle scheduling
+  const schedulerService = require('../services/scheduler.service');
+  
+  // If publish date provided and content is not published, schedule publication
+  if (publishDate && status !== 'published') {
+    await schedulerService.updateSchedule(id, publishDate, 'publish');
+  } else if (publishDate === null) {
+    // If publishDate set to null, remove any publish schedule
+    await schedulerService.removeSchedule(id, 'publish');
+  }
+  
+  // Handle unpublish scheduling
+  if (unpublishDate && status === 'published') {
+    await schedulerService.updateSchedule(id, unpublishDate, 'unpublish');
+  } else if (unpublishDate === null) {
+    // If unpublishDate set to null, remove any unpublish schedule
+    await schedulerService.removeSchedule(id, 'unpublish');
+  }
+
+  res.json({
+    message: 'Content updated successfully',
+    content: updatedContent
+  });
+});
 
 /**
  * Delete content
@@ -365,273 +438,235 @@ exports.searchContent = async (req, res) => {
 
 /**
  * Get content versions
+ * @route GET /api/content/:id/versions
+ * @access Private
  */
 exports.getContentVersions = async (req, res) => {
   try {
-    const content = await Content.findById(req.params.id);
-    
+    const { id } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Check if content exists and user has access
+    const content = await Content.findById(id);
     if (!content) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Content not found'
-      });
+      return res.status(404).json({ message: 'Content not found' });
     }
-    
-    // Check permissions
-    if (content.author.toString() !== req.user.id && 
-        req.user.role !== 'admin' && 
-        req.user.role !== 'editor') {
-      return res.status(403).json({
-        status: 'fail',
-        message: 'You do not have permission to view versions of this content'
-      });
-    }
-    
-    // Format versions and add metadata
-    const formattedVersions = await Promise.all(content.revisionHistory.map(async (version, index) => {
-      // Get editor name if available
-      let createdBy = 'Unknown';
-      if (version.editor) {
-        const User = mongoose.model('User');
-        const editor = await User.findById(version.editor).select('firstName lastName');
-        if (editor) {
-          createdBy = `${editor.firstName} ${editor.lastName}`;
-        }
+
+    // Get versions
+    const ContentVersion = mongoose.model('ContentVersion');
+    const versions = await ContentVersion.find({ contentId: id })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('createdBy', 'name email');
+
+    // Get total count for pagination
+    const total = await ContentVersion.countDocuments({ contentId: id });
+
+    res.json({
+      versions,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit)
       }
-      
-      return {
-        id: version._id,
-        createdAt: version.changedAt,
-        createdBy,
-        comment: version.changes,
-        isLatest: index === content.revisionHistory.length - 1
-      };
-    }));
-    
-    // Add current version if no versions exist
-    if (formattedVersions.length === 0) {
-      const User = mongoose.model('User');
-      let createdBy = 'Unknown';
-      
-      if (content.author) {
-        const author = await User.findById(content.author).select('firstName lastName');
-        if (author) {
-          createdBy = `${author.firstName} ${author.lastName}`;
-        }
-      }
-      
-      formattedVersions.push({
-        id: 'current',
-        createdAt: content.updatedAt,
-        createdBy,
-        comment: 'Current version',
-        isLatest: true
-      });
-    }
-    
-    res.status(200).json({
-      status: 'success',
-      versions: formattedVersions.reverse() // Most recent first
     });
   } catch (error) {
+    console.error('Error fetching content versions:', error);
     res.status(500).json({
-      status: 'error',
-      message: error.message
+      message: 'Error fetching content versions',
+      error: error.message
     });
   }
 };
 
 /**
  * Restore content version
+ * @route POST /api/content/:id/versions/:versionId/restore
+ * @access Private
  */
 exports.restoreContentVersion = async (req, res) => {
   try {
-    const content = await Content.findById(req.params.id);
+    const { id, versionId } = req.params;
     
+    // Check if content exists and user has access
+    const content = await Content.findById(id);
     if (!content) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Content not found'
-      });
+      return res.status(404).json({ message: 'Content not found' });
     }
-    
-    // Check permissions
-    if (content.author.toString() !== req.user.id && 
-        req.user.role !== 'admin' && 
-        req.user.role !== 'editor') {
-      return res.status(403).json({
-        status: 'fail',
-        message: 'You do not have permission to restore versions of this content'
-      });
+
+    // Check if user is authorized to update this content
+    if (content.author.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Not authorized to restore versions of this content' });
     }
+
+    // Get the version
+    const ContentVersion = mongoose.model('ContentVersion');
+    const version = await ContentVersion.findById(versionId);
     
-    // Find the version to restore
-    const versionToRestore = content.revisionHistory.id(req.params.versionId);
-    
-    if (!versionToRestore) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Version not found'
-      });
+    if (!version || version.contentId.toString() !== id) {
+      return res.status(404).json({ message: 'Version not found for this content' });
     }
-    
-    // Save current version to history before restoring
-    const currentVersion = {
-      editor: req.user.id,
-      changes: 'Saved before version restore',
-      content: {
-        title: content.title,
-        content: content.content,
-        excerpt: content.excerpt,
-        status: content.status
-      }
-    };
-    
-    content.revisionHistory.push(currentVersion);
-    
-    // Restore the version
-    if (versionToRestore.content) {
-      if (versionToRestore.content.title) content.title = versionToRestore.content.title;
-      if (versionToRestore.content.content) content.content = versionToRestore.content.content;
-      if (versionToRestore.content.excerpt) content.excerpt = versionToRestore.content.excerpt;
-    }
-    
-    // Mark as restored version
-    content.revisionHistory.push({
-      editor: req.user.id,
-      changes: `Restored version from ${new Date(versionToRestore.changedAt).toLocaleString()}`,
-      changedAt: new Date()
-    });
-    
-    await content.save();
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        content
-      }
+
+    // Create a version of current state before restoring
+    await this.createContentVersion(
+      id, 
+      `State before restoring to version from ${new Date(version.createdAt).toLocaleString()}`, 
+      req.user.id
+    );
+
+    // Update content with version data
+    const updatedContent = await Content.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          title: version.title,
+          content: version.content,
+          excerpt: version.excerpt,
+          status: version.status,
+          categories: version.categories,
+          tags: version.tags,
+          featuredImage: version.featuredImage,
+          seo: version.seo,
+          updatedAt: Date.now()
+        }
+      },
+      { new: true }
+    );
+
+    res.json({
+      message: 'Content version restored successfully',
+      content: updatedContent
     });
   } catch (error) {
+    console.error('Error restoring content version:', error);
     res.status(500).json({
-      status: 'error',
-      message: error.message
+      message: 'Error restoring content version',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Schedule content publication/unpublication
+ * @route POST /api/content/:id/schedule
+ * @access Private
+ */
+exports.scheduleContent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { date, action } = req.body;
+
+    // Validate inputs
+    if (!date) {
+      return res.status(400).json({ message: 'Date is required' });
+    }
+
+    if (!['publish', 'unpublish'].includes(action)) {
+      return res.status(400).json({ message: 'Action must be either "publish" or "unpublish"' });
+    }
+
+    // Check if content exists
+    const content = await Content.findById(id);
+    if (!content) {
+      return res.status(404).json({ message: 'Content not found' });
+    }
+
+    // Check authorization
+    if (content.author.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Not authorized to schedule this content' });
+    }
+
+    // Schedule the content
+    const schedulerService = require('../services/scheduler.service');
+    const scheduled = await schedulerService.scheduleContent(id, new Date(date), action);
+
+    res.json({
+      message: `Content ${action} scheduled for ${new Date(date).toLocaleString()}`,
+      scheduled
+    });
+  } catch (error) {
+    console.error(`Error scheduling content:`, error);
+    res.status(500).json({
+      message: 'Error scheduling content',
+      error: error.message
     });
   }
 };
 
 /**
  * Get content schedule
+ * @route GET /api/content/:id/schedule
+ * @access Private
  */
 exports.getContentSchedule = async (req, res) => {
   try {
-    const content = await Content.findById(req.params.id).select('scheduledPublish status');
-    
+    const { id } = req.params;
+
+    // Check if content exists
+    const content = await Content.findById(id);
     if (!content) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Content not found'
-      });
+      return res.status(404).json({ message: 'Content not found' });
     }
-    
-    res.status(200).json({
-      status: 'success',
-      scheduledPublish: content.scheduledPublish,
-      currentStatus: content.status
-    });
+
+    // Get schedule
+    const schedulerService = require('../services/scheduler.service');
+    const schedule = await schedulerService.getContentSchedule(id);
+
+    res.json(schedule);
   } catch (error) {
+    console.error('Error getting content schedule:', error);
     res.status(500).json({
-      status: 'error',
-      message: error.message
+      message: 'Error getting content schedule',
+      error: error.message
     });
   }
 };
 
 /**
- * Schedule content
- */
-exports.scheduleContent = async (req, res) => {
-  try {
-    const content = await Content.findById(req.params.id);
-    
-    if (!content) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Content not found'
-      });
-    }
-    
-    // Check permissions
-    if (content.author.toString() !== req.user.id && 
-        req.user.role !== 'admin' && 
-        req.user.role !== 'editor') {
-      return res.status(403).json({
-        status: 'fail',
-        message: 'You do not have permission to schedule this content'
-      });
-    }
-    
-    // Validate date is in the future
-    const scheduledPublish = new Date(req.body.scheduledPublish);
-    
-    if (scheduledPublish <= new Date()) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Scheduled publish date must be in the future'
-      });
-    }
-    
-    content.scheduledPublish = scheduledPublish;
-    await content.save();
-    
-    res.status(200).json({
-      status: 'success',
-      data: {
-        scheduledPublish: content.scheduledPublish
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: error.message
-    });
-  }
-};
-
-/**
- * Delete schedule
+ * Delete content schedule
+ * @route DELETE /api/content/:id/schedule
+ * @access Private
  */
 exports.deleteSchedule = async (req, res) => {
   try {
-    const content = await Content.findById(req.params.id);
-    
+    const { id } = req.params;
+    const { action } = req.query; // 'publish', 'unpublish', or undefined for both
+
+    // Check if content exists
+    const content = await Content.findById(id);
     if (!content) {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Content not found'
-      });
+      return res.status(404).json({ message: 'Content not found' });
     }
-    
-    // Check permissions
-    if (content.author.toString() !== req.user.id && 
-        req.user.role !== 'admin' && 
-        req.user.role !== 'editor') {
-      return res.status(403).json({
-        status: 'fail',
-        message: 'You do not have permission to modify this content'
-      });
+
+    // Check authorization
+    if (content.author.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Not authorized to manage schedules for this content' });
     }
+
+    // Delete the schedule
+    const schedulerService = require('../services/scheduler.service');
     
-    content.scheduledPublish = null;
-    await content.save();
-    
-    res.status(200).json({
-      status: 'success',
-      data: null
-    });
+    if (action) {
+      // Delete specific schedule type
+      if (!['publish', 'unpublish'].includes(action)) {
+        return res.status(400).json({ message: 'Action must be either "publish" or "unpublish"' });
+      }
+      await schedulerService.removeSchedule(id, action);
+      res.json({ message: `${action} schedule removed successfully` });
+    } else {
+      // Delete all schedules for this content
+      await schedulerService.removeAllSchedules(id);
+      res.json({ message: 'All schedules removed successfully' });
+    }
   } catch (error) {
+    console.error('Error deleting content schedule:', error);
     res.status(500).json({
-      status: 'error',
-      message: error.message
+      message: 'Error deleting content schedule',
+      error: error.message
     });
   }
 };
@@ -781,5 +816,56 @@ exports.useTemplate = async (req, res) => {
       status: 'error',
       message: error.message
     });
+  }
+};
+
+/**
+ * Create a version of content for the versioning system
+ * @private
+ */
+exports.createContentVersion = async (contentId, comment, userId) => {
+  try {
+    // Get the current content
+    const content = await Content.findById(contentId);
+    if (!content) {
+      throw new Error('Content not found');
+    }
+
+    // Create new version record
+    const version = {
+      contentId,
+      title: content.title,
+      content: content.content,
+      excerpt: content.excerpt,
+      status: content.status,
+      categories: content.categories,
+      tags: content.tags,
+      featuredImage: content.featuredImage,
+      seo: content.seo,
+      comment,
+      createdBy: userId,
+      createdAt: new Date()
+    };
+
+    // Store in ContentVersion model
+    const ContentVersion = mongoose.model('ContentVersion');
+    await ContentVersion.create(version);
+
+    // Limit to 10 most recent versions per content
+    const allVersions = await ContentVersion.find({ contentId })
+      .sort({ createdAt: -1 });
+    
+    if (allVersions.length > 10) {
+      // Delete oldest versions beyond the 10 limit
+      const versionsToDelete = allVersions.slice(10);
+      for (const oldVersion of versionsToDelete) {
+        await ContentVersion.findByIdAndDelete(oldVersion._id);
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error creating content version:', error);
+    return false;
   }
 }; 
