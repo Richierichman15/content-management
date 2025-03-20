@@ -11,6 +11,55 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
   const [showExcerpt, setShowExcerpt] = useState(false);
   const [generatedExcerpt, setGeneratedExcerpt] = useState('');
   const [analysisResult, setAnalysisResult] = useState(null);
+  const [requestInProgress, setRequestInProgress] = useState(false);
+
+  // Helper function to make API requests with proper error handling
+  const makeApiRequest = async (url, body, successCallback, successMessage) => {
+    if (requestInProgress) {
+      toast.info('Please wait for the current request to complete');
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      setRequestInProgress(true);
+      
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(body)
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Request failed with status ${response.status}`);
+      }
+      
+      const data = await response.json();
+      successCallback(data);
+      
+      if (successMessage) {
+        toast.success(successMessage);
+      }
+      
+      return data;
+    } catch (error) {
+      console.error(`API error for ${url}:`, error);
+      toast.error(error.message || 'An error occurred');
+      return null;
+    } finally {
+      setLoading(false);
+      setRequestInProgress(false);
+    }
+  };
 
   // Generate content based on prompt
   const handleGenerateContent = async () => {
@@ -19,66 +68,35 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
       return;
     }
 
-    setLoading(true);
-    try {
-      const response = await fetch('/api/ai/generate/text', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          prompt,
-          length: 500,
-          tone: 'professional'
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to generate content');
-      }
-
-      const data = await response.json();
-      onContentUpdate(data.generatedText);
-      toast.success('Content generated successfully');
-      
-      // After generating content, generate title suggestions
-      generateTitleSuggestions(data.generatedText);
-    } catch (error) {
-      toast.error(error.message || 'Error generating content');
-    } finally {
-      setLoading(false);
-    }
+    const data = await makeApiRequest(
+      '/api/ai/generate/text',
+      {
+        prompt,
+        length: 500,
+        tone: 'professional'
+      },
+      (data) => {
+        onContentUpdate(data.generatedText);
+        // After generating content, generate title suggestions
+        generateTitleSuggestions(data.generatedText);
+      },
+      'Content generated successfully'
+    );
   };
 
   // Generate title suggestions for the content
   const generateTitleSuggestions = async (contentText) => {
-    setLoading(true);
-    try {
-      const response = await fetch('/api/ai/generate/title', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          content: contentText || content.content,
-          count: 5
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to generate title suggestions');
+    await makeApiRequest(
+      '/api/ai/generate/title',
+      {
+        content: contentText || content.content,
+        count: 5
+      },
+      (data) => {
+        setSelectedTitles(data.titles);
+        setShowTitles(true);
       }
-
-      const data = await response.json();
-      setSelectedTitles(data.titles);
-      setShowTitles(true);
-    } catch (error) {
-      toast.error(error.message || 'Error generating title suggestions');
-    } finally {
-      setLoading(false);
-    }
+    );
   };
 
   // Apply selected title
@@ -95,32 +113,17 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
       return;
     }
 
-    setLoading(true);
-    try {
-      const response = await fetch('/api/ai/generate/excerpt', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          content: content.content,
-          length: 150
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to generate excerpt');
+    await makeApiRequest(
+      '/api/ai/generate/excerpt',
+      {
+        content: content.content,
+        length: 150
+      },
+      (data) => {
+        setGeneratedExcerpt(data.excerpt);
+        setShowExcerpt(true);
       }
-
-      const data = await response.json();
-      setGeneratedExcerpt(data.excerpt);
-      setShowExcerpt(true);
-    } catch (error) {
-      toast.error(error.message || 'Error generating excerpt');
-    } finally {
-      setLoading(false);
-    }
+    );
   };
 
   // Apply generated excerpt
@@ -137,32 +140,15 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
       return;
     }
 
-    setLoading(true);
-    try {
-      const response = await fetch('/api/ai/enhance/seo', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          content: content.content,
-          keywords: content.tags
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to enhance content');
-      }
-
-      const data = await response.json();
-      onContentUpdate(data.enhancedContent);
-      toast.success('Content enhanced for SEO');
-    } catch (error) {
-      toast.error(error.message || 'Error enhancing content');
-    } finally {
-      setLoading(false);
-    }
+    await makeApiRequest(
+      '/api/ai/enhance/seo',
+      {
+        content: content.content,
+        keywords: content.tags
+      },
+      (data) => onContentUpdate(data.enhancedContent),
+      'Content enhanced for SEO'
+    );
   };
 
   // Improve content readability
@@ -172,32 +158,15 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
       return;
     }
 
-    setLoading(true);
-    try {
-      const response = await fetch('/api/ai/enhance/readability', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          content: content.content,
-          targetLevel: 'general'
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to improve readability');
-      }
-
-      const data = await response.json();
-      onContentUpdate(data.enhancedContent);
-      toast.success('Content readability improved');
-    } catch (error) {
-      toast.error(error.message || 'Error improving readability');
-    } finally {
-      setLoading(false);
-    }
+    await makeApiRequest(
+      '/api/ai/enhance/readability',
+      {
+        content: content.content,
+        targetLevel: 'general'
+      },
+      (data) => onContentUpdate(data.enhancedContent),
+      'Content readability improved'
+    );
   };
 
   // Fix grammar and spelling
@@ -207,31 +176,12 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
       return;
     }
 
-    setLoading(true);
-    try {
-      const response = await fetch('/api/ai/enhance/grammar', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          content: content.content
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fix grammar');
-      }
-
-      const data = await response.json();
-      onContentUpdate(data.enhancedContent);
-      toast.success('Grammar and spelling corrected');
-    } catch (error) {
-      toast.error(error.message || 'Error fixing grammar');
-    } finally {
-      setLoading(false);
-    }
+    await makeApiRequest(
+      '/api/ai/enhance/grammar',
+      { content: content.content },
+      (data) => onContentUpdate(data.enhancedContent),
+      'Grammar and spelling corrected'
+    );
   };
 
   // Analyze content and extract insights
@@ -241,31 +191,14 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
       return;
     }
 
-    setLoading(true);
-    try {
-      const response = await fetch('/api/ai/analyze/content', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          content: content.content
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to analyze content');
+    await makeApiRequest(
+      '/api/ai/analyze/content',
+      { content: content.content },
+      (data) => {
+        setAnalysisResult(data.analysis);
+        setActiveTab('analyze');
       }
-
-      const data = await response.json();
-      setAnalysisResult(data.analysis);
-      setActiveTab('analyze');
-    } catch (error) {
-      toast.error(error.message || 'Error analyzing content');
-    } finally {
-      setLoading(false);
-    }
+    );
   };
 
   // Extract keywords and tags
@@ -275,33 +208,15 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
       return;
     }
 
-    setLoading(true);
-    try {
-      const response = await fetch('/api/ai/analyze/keywords', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          content: content.content,
-          count: 10
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to extract keywords');
-      }
-
-      const data = await response.json();
-      const keywords = data.keywords.map(k => k.keyword);
-      onTagsUpdate(keywords);
-      toast.success('Keywords extracted and added as tags');
-    } catch (error) {
-      toast.error(error.message || 'Error extracting keywords');
-    } finally {
-      setLoading(false);
-    }
+    await makeApiRequest(
+      '/api/ai/analyze/keywords',
+      {
+        content: content.content,
+        count: 10
+      },
+      (data) => onTagsUpdate(data.keywords.map(k => k.keyword)),
+      'Keywords extracted and added as tags'
+    );
   };
 
   return (
@@ -313,14 +228,15 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
         </h3>
         
         <div className="mt-4 border-b border-gray-200">
-          <nav className="-mb-px flex space-x-8">
+          <nav className="-mb-px flex space-x-8 overflow-x-auto">
             <button
               className={`${
                 activeTab === 'generate'
                   ? 'border-indigo-500 text-indigo-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              } whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm`}
+              } whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm focus:outline-none transition`}
               onClick={() => setActiveTab('generate')}
+              disabled={loading}
             >
               Generate
             </button>
@@ -329,8 +245,9 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                 activeTab === 'enhance'
                   ? 'border-indigo-500 text-indigo-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              } whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm`}
+              } whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm focus:outline-none transition`}
               onClick={() => setActiveTab('enhance')}
+              disabled={loading}
             >
               Enhance
             </button>
@@ -339,15 +256,25 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                 activeTab === 'analyze'
                   ? 'border-indigo-500 text-indigo-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              } whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm`}
+              } whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm focus:outline-none transition`}
               onClick={() => setActiveTab('analyze')}
+              disabled={loading}
             >
               Analyze
             </button>
           </nav>
         </div>
 
-        <div className="mt-4">
+        {loading && (
+          <div className="absolute inset-0 bg-white bg-opacity-60 flex items-center justify-center z-10">
+            <div className="flex flex-col items-center">
+              <ArrowPathIcon className="h-8 w-8 text-indigo-500 animate-spin" />
+              <p className="mt-2 text-sm text-gray-600">AI is working on your content...</p>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4 relative">
           {activeTab === 'generate' && (
             <div className="space-y-4">
               <div>
@@ -362,6 +289,7 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                     placeholder="Write about benefits of using AI in content management..."
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
+                    disabled={loading}
                   ></textarea>
                 </div>
               </div>
@@ -370,17 +298,24 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                 <button
                   type="button"
                   onClick={handleGenerateContent}
-                  disabled={loading}
-                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                  disabled={loading || !prompt.trim()}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition"
                 >
-                  {loading ? 'Generating...' : 'Generate Content'}
+                  {loading ? (
+                    <>
+                      <ArrowPathIcon className="animate-spin -ml-1 mr-2 h-4 w-4" />
+                      Generating...
+                    </>
+                  ) : (
+                    'Generate Content'
+                  )}
                 </button>
                 
                 <button
                   type="button"
                   onClick={() => generateTitleSuggestions()}
                   disabled={loading || !content.content}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition"
                 >
                   Suggest Titles
                 </button>
@@ -389,7 +324,7 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                   type="button"
                   onClick={generateExcerpt}
                   disabled={loading || !content.content}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition"
                 >
                   Generate Excerpt
                 </button>
@@ -406,7 +341,7 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                         <button
                           type="button"
                           onClick={() => applyTitle(title)}
-                          className="text-xs text-indigo-600 hover:text-indigo-900"
+                          className="text-xs text-indigo-600 hover:text-indigo-900 transition"
                         >
                           Use
                         </button>
@@ -424,7 +359,7 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                   <button
                     type="button"
                     onClick={applyExcerpt}
-                    className="text-xs text-indigo-600 hover:text-indigo-900"
+                    className="text-xs text-indigo-600 hover:text-indigo-900 transition"
                   >
                     Use This Excerpt
                   </button>
@@ -444,7 +379,7 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                   type="button"
                   onClick={enhanceContentSEO}
                   disabled={loading || !content.content}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition"
                 >
                   Optimize for SEO
                 </button>
@@ -453,7 +388,7 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                   type="button"
                   onClick={improveReadability}
                   disabled={loading || !content.content}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition"
                 >
                   Improve Readability
                 </button>
@@ -462,18 +397,11 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                   type="button"
                   onClick={fixGrammar}
                   disabled={loading || !content.content}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition"
                 >
                   Fix Grammar & Spelling
                 </button>
               </div>
-              
-              {loading && (
-                <div className="flex justify-center my-4">
-                  <ArrowPathIcon className="h-5 w-5 text-indigo-500 animate-spin" />
-                  <span className="ml-2 text-sm text-gray-600">Enhancing content...</span>
-                </div>
-              )}
             </div>
           )}
 
@@ -488,7 +416,7 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                   type="button"
                   onClick={analyzeContent}
                   disabled={loading || !content.content}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition"
                 >
                   <AcademicCapIcon className="-ml-1 mr-2 h-4 w-4" />
                   Content Analysis
@@ -498,19 +426,12 @@ const AIAssistant = ({ content, onContentUpdate, onExcerptUpdate, onTitleUpdate,
                   type="button"
                   onClick={extractKeywords}
                   disabled={loading || !content.content}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition"
                 >
                   <MagnifyingGlassIcon className="-ml-1 mr-2 h-4 w-4" />
                   Extract Keywords
                 </button>
               </div>
-              
-              {loading && (
-                <div className="flex justify-center my-4">
-                  <ArrowPathIcon className="h-5 w-5 text-indigo-500 animate-spin" />
-                  <span className="ml-2 text-sm text-gray-600">Analyzing content...</span>
-                </div>
-              )}
               
               {/* Analysis results */}
               {analysisResult && (
