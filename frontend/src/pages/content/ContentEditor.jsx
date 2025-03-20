@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, forwardRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from 'react-toastify';
@@ -11,6 +11,13 @@ import AIAssistant from '../../components/content/AIAssistant';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { DocumentTextIcon, DocumentDuplicateIcon, EyeIcon, ClockIcon, ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
+
+// Add custom wrapper to fix ReactQuill findDOMNode warnings
+const ReactQuillWrapper = forwardRef((props, ref) => {
+  return <ReactQuill ref={ref} {...props} />;
+});
+
+ReactQuillWrapper.displayName = 'ReactQuillWrapper';
 
 const ContentEditor = () => {
   const { id } = useParams();
@@ -309,7 +316,7 @@ const ContentEditor = () => {
                       Content
                     </label>
                     <div className="mt-1">
-                      <ReactQuill
+                      <ReactQuillWrapper
                         theme="snow"
                         value={content.content}
                         onChange={(value) =>

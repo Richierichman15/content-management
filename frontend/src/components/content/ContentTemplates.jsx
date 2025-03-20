@@ -6,7 +6,7 @@ import NetworkError from '../common/NetworkError';
 import { DocumentTextIcon, DocumentDuplicateIcon, ChevronRightIcon, 
   AdjustmentsHorizontalIcon, TagIcon, CalendarIcon } from '@heroicons/react/24/outline';
 
-const ContentTemplates = ({ onSelectTemplate, onClose }) => {
+const ContentTemplates = ({ onSelect, onClose }) => {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -49,8 +49,8 @@ const ContentTemplates = ({ onSelectTemplate, onClose }) => {
   };
 
   const handleUseTemplate = (template) => {
-    if (onSelectTemplate) {
-      onSelectTemplate(template);
+    if (onSelect) {
+      onSelect(template);
     }
   };
 
@@ -232,7 +232,7 @@ const ContentTemplates = ({ onSelectTemplate, onClose }) => {
 };
 
 ContentTemplates.propTypes = {
-  onSelectTemplate: PropTypes.func.isRequired,
+  onSelect: PropTypes.func.isRequired,
   onClose: PropTypes.func.isRequired,
 };
 

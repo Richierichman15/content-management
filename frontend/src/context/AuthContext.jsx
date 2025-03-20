@@ -4,6 +4,31 @@ import axios from 'axios';
 // Create auth context
 const AuthContext = createContext(null);
 
+// Set up axios defaults and interceptors
+const setupAxios = (token) => {
+  // Set default headers
+  if (token) {
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  } else {
+    delete axios.defaults.headers.common['Authorization'];
+  }
+
+  // Add response interceptor for 401/403 errors
+  axios.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+        // Clear token on auth errors
+        localStorage.removeItem('token');
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+      }
+      return Promise.reject(error);
+    }
+  );
+};
+
 // Custom hook to use the auth context
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -23,6 +48,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
+      setupAxios(token);
       fetchUserProfile(token);
     } else {
       setLoading(false);
@@ -60,6 +86,9 @@ export const AuthProvider = ({ children }) => {
       // Store token
       localStorage.setItem('token', token);
       
+      // Set up axios with the token
+      setupAxios(token);
+      
       // Set user state
       setUser(userData);
       setError(null);
@@ -74,7 +103,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Register function
+  // Register function with improved error handling
   const register = async (name, email, password) => {
     try {
       setLoading(true);
@@ -88,6 +117,9 @@ export const AuthProvider = ({ children }) => {
       
       // Store token
       localStorage.setItem('token', token);
+      
+      // Set up axios with the token
+      setupAxios(token);
       
       // Set user state
       setUser(userData);
@@ -106,7 +138,9 @@ export const AuthProvider = ({ children }) => {
   // Logout function
   const logout = () => {
     localStorage.removeItem('token');
+    delete axios.defaults.headers.common['Authorization'];
     setUser(null);
+    window.location.href = '/login';
   };
 
   // For testing purposes - mock user data
@@ -119,6 +153,7 @@ export const AuthProvider = ({ children }) => {
     };
     
     localStorage.setItem('token', 'mock-token');
+    setupAxios('mock-token');
     setUser(mockUser);
     return true;
   };

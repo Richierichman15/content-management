@@ -2,6 +2,11 @@ import React from 'react';
 import PropTypes from 'prop-types';
 
 const NetworkError = ({ error, onRetry }) => {
+  // Format the error message based on error type
+  const errorMessage = typeof error === 'string' 
+    ? error 
+    : error?.message || 'Something went wrong. Please try again.';
+
   return (
     <div className="min-h-[400px] flex items-center justify-center bg-white rounded-lg shadow">
       <div className="max-w-md w-full space-y-8 text-center p-6">
@@ -25,7 +30,7 @@ const NetworkError = ({ error, onRetry }) => {
             Network Error
           </h2>
           <p className="mt-2 text-sm text-gray-600">
-            {error?.message || 'Something went wrong. Please try again.'}
+            {errorMessage}
           </p>
         </div>
         {onRetry && (
@@ -44,9 +49,12 @@ const NetworkError = ({ error, onRetry }) => {
 };
 
 NetworkError.propTypes = {
-  error: PropTypes.shape({
-    message: PropTypes.string,
-  }),
+  error: PropTypes.oneOfType([
+    PropTypes.string,
+    PropTypes.shape({
+      message: PropTypes.string,
+    })
+  ]),
   onRetry: PropTypes.func,
 };
 

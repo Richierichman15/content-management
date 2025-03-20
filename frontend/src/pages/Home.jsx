@@ -1,26 +1,41 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import LoadingSpinner from '../components/common/LoadingSpinner';
+import { useAuth } from '../context/AuthContext';
 
 const Home = () => {
   const [recentContent, setRecentContent] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const { isAuthenticated } = useAuth();
 
   useEffect(() => {
     const fetchRecentContent = async () => {
       try {
-        const response = await fetch('/api/content/published?limit=6');
+        setError(null);
+        // Add auth token if user is authenticated
+        const headers = isAuthenticated ? {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        } : {};
+        
+        const response = await fetch('/api/content/published?limit=6', { headers });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
+        }
+        
         const data = await response.json();
         setRecentContent(data.data || []);
       } catch (error) {
         console.error('Error fetching recent content:', error);
+        setError('Failed to load recent content');
       } finally {
         setLoading(false);
       }
     };
 
     fetchRecentContent();
-  }, []);
+  }, [isAuthenticated]);
 
   return (
     <div className="space-y-8">
@@ -80,7 +95,9 @@ const Home = () => {
           <h2 className="text-2xl font-bold text-gray-900 mb-8">Recent Content</h2>
           {loading ? (
             <LoadingSpinner />
-          ) : (
+          ) : error ? (
+            <p className="text-center text-red-500">{error}</p>
+          ) : recentContent.length > 0 ? (
             <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
               {recentContent.map((content) => (
                 <Link
@@ -107,14 +124,13 @@ const Home = () => {
                         {new Date(content.createdAt).toLocaleDateString()}
                       </span>
                       <span className="mx-2">•</span>
-                      <span>{content.readingTime} min read</span>
+                      <span>{content.readingTime || '5'} min read</span>
                     </div>
                   </div>
                 </Link>
               ))}
             </div>
-          )}
-          {!loading && recentContent.length === 0 && (
+          ) : (
             <p className="text-center text-gray-500">No content available yet.</p>
           )}
         </div>
